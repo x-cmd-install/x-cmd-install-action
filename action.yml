@@ -3,7 +3,7 @@ description: 'Composite action that runs card → loc → sync for an x-cmd-inst
 
 inputs:
   owner-repo:
-    description: 'x-cmd-install/<software> form. Pass ${{ github.repository }} from the caller.'
+    description: 'x-cmd-install/<software> form. Caller passes github.repository explicitly.'
     required: true
   days:
     description: 'Width of the middle window in `recent:` (lastNd).'
