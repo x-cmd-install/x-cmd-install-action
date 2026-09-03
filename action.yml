@@ -3,8 +3,9 @@ description: 'Composite action that runs card → loc → sync for an x-cmd-inst
 
 inputs:
   owner-repo:
-    description: 'x-cmd-install/<software> form. Normally ${{ github.repository }}.'
-    required: true
+    description: 'x-cmd-install/<software> form. Defaults to ${{ github.repository }}.'
+    required: false
+    default: ${{ github.repository }}
   days:
     description: 'Width of the middle window in `recent:` (lastNd).'
     required: false
@@ -37,34 +38,27 @@ runs:
   steps:
     - name: Run card stage
       id: card
+      if: ${{ contains(inputs.stages, 'card') }}
       shell: bash
       env:
         OWNER_REPO: ${{ inputs.owner-repo }}
         DAYS: ${{ inputs.days }}
+        GH_TOKEN: ${{ github.token }}
       run: |
-        # TODO: replace with x repo card call once the runner image ships x-cmd.
-        # For now this is a thin shim that mirrors card.sh from x-bash/repo:
-        # 1 GraphQL + 1 REST commit_activity, jq filter, emit YAML.
         set -euo pipefail
-        : "${OWNER_REPO:?owner-repo required}"
-        : "${DAYS:=90}"
-
         d=$(date -u +%y%m%d)
         out="data/${d}.yml"
         mkdir -p data
 
-        # TODO: wire this to x repo card when available on the runner.
-        # Placeholder so the action is callable today without 500-ing:
-        cat > "$out" <<CARD
-about:
-  description: (pending — wire x repo card into the action runner)
-  collected_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-CARD
+        # Delegate to the inlined jq filter (card.jq + card.sh). The
+        # bundle lives next to this action.yml so no PATH or install
+        # step is needed on the runner.
+        "${{ github.action_path }}/scripts/card.sh" "$OWNER_REPO" "$DAYS" > "$out"
 
         echo "card-path=$out" >> "$GITHUB_OUTPUT"
         echo "collected-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
-    - name: Run loc stage (no-op stub)
+    - name: Run loc stage (stub)
       id: loc
       if: ${{ contains(inputs.stages, 'loc') }}
       shell: bash
@@ -72,7 +66,7 @@ CARD
         # TODO: clone upstream at HEAD, run cloc, write data/<YYMMDD>.loc.yml.
         echo "loc-path=(not yet implemented)" >> "$GITHUB_OUTPUT"
 
-    - name: Run sync stage (no-op stub)
+    - name: Run sync stage (stub)
       id: sync
       if: ${{ contains(inputs.stages, 'sync') }}
       shell: bash
@@ -86,13 +80,13 @@ CARD
       shell: bash
       run: |
         if git status --porcelain -- data/ | grep -q .; then
-          git config user.name  "x-cmd-install-bot"
-          git config user.email "bot@x-cmd.com"
-          git add data/
-          git commit -m "${{ inputs.commit-message }}"
-          git push
+            git config user.name  "x-cmd-install-bot"
+            git config user.email "bot@x-cmd.com"
+            git add data/
+            git commit -m "${{ inputs.commit-message }}"
+            git push
         else
-          echo "no data changes to commit"
+            echo "no data changes to commit"
         fi
 
 branding:
