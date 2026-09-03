@@ -1,0 +1,100 @@
+name: 'x-cmd-install-action'
+description: 'Composite action that runs card → loc → sync for an x-cmd-install/<software> repo.'
+
+inputs:
+  owner-repo:
+    description: 'x-cmd-install/<software> form. Normally ${{ github.repository }}.'
+    required: true
+  days:
+    description: 'Width of the middle window in `recent:` (lastNd).'
+    required: false
+    default: '90'
+  stages:
+    description: 'Comma-separated subset of card,loc,sync.'
+    required: false
+    default: 'card'
+  sourcecode-org:
+    description: 'Org that receives the sync stage push.'
+    required: false
+    default: 'x-cmd-sourcecode'
+  commit-message:
+    description: 'Commit message for the data commit.'
+    required: false
+    default: 'card: collect <YYMMDD> snapshot'
+
+outputs:
+  card-path:
+    description: 'Path to the rendered card YAML inside the runner.'
+  loc-path:
+    description: 'Path to the LOC YAML (only set if loc stage ran).'
+  synced:
+    description: 'true if the sync stage pushed successfully.'
+  collected-at:
+    description: 'ISO-8601 timestamp of when card ran.'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run card stage
+      id: card
+      shell: bash
+      env:
+        OWNER_REPO: ${{ inputs.owner-repo }}
+        DAYS: ${{ inputs.days }}
+      run: |
+        # TODO: replace with x repo card call once the runner image ships x-cmd.
+        # For now this is a thin shim that mirrors card.sh from x-bash/repo:
+        # 1 GraphQL + 1 REST commit_activity, jq filter, emit YAML.
+        set -euo pipefail
+        : "${OWNER_REPO:?owner-repo required}"
+        : "${DAYS:=90}"
+
+        d=$(date -u +%y%m%d)
+        out="data/${d}.yml"
+        mkdir -p data
+
+        # TODO: wire this to x repo card when available on the runner.
+        # Placeholder so the action is callable today without 500-ing:
+        cat > "$out" <<CARD
+about:
+  description: (pending — wire x repo card into the action runner)
+  collected_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+CARD
+
+        echo "card-path=$out" >> "$GITHUB_OUTPUT"
+        echo "collected-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+    - name: Run loc stage (no-op stub)
+      id: loc
+      if: ${{ contains(inputs.stages, 'loc') }}
+      shell: bash
+      run: |
+        # TODO: clone upstream at HEAD, run cloc, write data/<YYMMDD>.loc.yml.
+        echo "loc-path=(not yet implemented)" >> "$GITHUB_OUTPUT"
+
+    - name: Run sync stage (no-op stub)
+      id: sync
+      if: ${{ contains(inputs.stages, 'sync') }}
+      shell: bash
+      env:
+        SOURCECODE_ORG: ${{ inputs.sourcecode-org }}
+      run: |
+        # TODO: cross-org push of data/ to ${SOURCECODE_ORG}/<software>.
+        echo "synced=false" >> "$GITHUB_OUTPUT"
+
+    - name: Commit data/
+      shell: bash
+      run: |
+        if git status --porcelain -- data/ | grep -q .; then
+          git config user.name  "x-cmd-install-bot"
+          git config user.email "bot@x-cmd.com"
+          git add data/
+          git commit -m "${{ inputs.commit-message }}"
+          git push
+        else
+          echo "no data changes to commit"
+        fi
+
+branding:
+  icon: 'database'
+  color: 'blue'
