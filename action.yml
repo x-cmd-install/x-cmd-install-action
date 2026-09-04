@@ -43,6 +43,10 @@ runs:
       shell: bash
       env:
         OWNER_REPO: ${{ inputs.owner-repo }}
+        # x-cmd reads GH_TOKEN first, falling back to GITHUB_TOKEN.
+        # The runner's GITHUB_TOKEN gives 1000 req/h per repo —
+        # enough for the 2 API calls card makes per run.
+        GH_TOKEN: ${{ github.token }}
       run: |
         # Note: no `set -u` here — the X file from x-cmd-action/x-cmd
         # references unset variables on its first line and would crash
@@ -59,6 +63,7 @@ runs:
       shell: bash
       env:
         OWNER_REPO: ${{ inputs.owner-repo }}
+        GH_TOKEN: ${{ github.token }}
       run: |
         set -eo pipefail
         . "$HOME/.x-cmd.root/X"
