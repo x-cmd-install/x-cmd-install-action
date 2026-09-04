@@ -38,6 +38,14 @@ runs:
       with:
         stream: ${{ inputs.stream }}
 
+    # x repo loc depends on the `tokei` binary, which the x-cmd base
+    # install doesn't pull in. Install it via the official Rust action
+    # so the loc stage has something to run.
+    - name: Install tokei
+      uses: taiki-e/install-action@v2
+      with:
+        tool: tokei
+
     - name: Run card stage
       id: card
       shell: bash
@@ -67,12 +75,11 @@ runs:
       run: |
         set -eo pipefail
         . "$HOME/.x-cmd.root/X"
-        # x repo loc clones the upstream repo into ~/.x-repo/ then runs
-        # tokei. Debug the runtime first, then run.
-        echo "PATH=$PATH" >&2
-        echo "x version: $(x rc-version 2>/dev/null || echo unknown)" >&2
-        command -v tokei >&2 || echo "tokei NOT FOUND" >&2
-        command -v git >&2 || echo "git NOT FOUND" >&2
+        # tokei is installed by the taiki-e step above; its binary
+        # lives under the tool cache and the install step puts it on
+        # PATH for subsequent steps. If it's somehow missing, fail
+        # loud rather than producing a silent empty loc.yml.
+        command -v tokei >/dev/null || { echo "tokei not on PATH" >&2; exit 1; }
         if ! x repo loc --yml "$OWNER_REPO" > /tmp/loc.yml 2> /tmp/loc.err; then
             echo "loc stage failed (rc=$?):" >&2
             cat /tmp/loc.err >&2
