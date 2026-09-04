@@ -38,13 +38,18 @@ runs:
       with:
         stream: ${{ inputs.stream }}
 
-    # x repo loc depends on the `tokei` binary, which the x-cmd base
-    # install doesn't pull in. Install it via the official Rust action
-    # so the loc stage has something to run.
-    - name: Install tokei
-      uses: taiki-e/install-action@v2
-      with:
-        tool: tokei
+    # x repo loc depends on the `tokei` binary. The x-cmd base install
+    # doesn't pull it in — `x env use tokei` is the canonical way to
+    # make it available on PATH. (The taiki-e action puts tokei in
+    # $HOME/.cargo/bin, but x-cmd's `x which` looks in its own pkg
+    # dir and says "not found", so x repo loc silently returns empty.)
+    - name: Install tokei via x-cmd
+      shell: bash
+      run: |
+        set +o errexit
+        . "$HOME/.x-cmd.root/X"
+        x env use tokei
+        command -v tokei
 
     - name: Run card stage
       id: card
@@ -82,6 +87,11 @@ runs:
       run: |
         set -eo pipefail
         . "$HOME/.x-cmd.root/X"
+        if ! command -v tokei >/dev/null; then
+            # Fallback: x-cmd's own package manager. `x env use tokei`
+            # symlinks the binary into the x-cmd-managed bin dir.
+            x env use tokei || true
+        fi
         : > /tmp/loc.yml
         if command -v tokei >/dev/null; then
             x repo loc --yml "$OWNER_REPO" > /tmp/loc.yml 2> /tmp/loc.err || {
@@ -90,7 +100,7 @@ runs:
                 : > /tmp/loc.yml
             }
         else
-            echo "tokei not on PATH; skipping loc content" >&2
+            echo "tokei still not on PATH after x env use; skipping loc content" >&2
         fi
         echo "loc-bytes=$(wc -c < /tmp/loc.yml)" >> "$GITHUB_OUTPUT"
 
