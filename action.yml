@@ -74,10 +74,12 @@ runs:
         # If scorecard input is empty, default to owner-repo. The
         # github.com/ prefix is what the openssf API expects.
         sc="${SCORECARD:-$OWNER_REPO}"
-        # Strip the `documentation:` block from each check entry; it's
-        # verbose docs URLs we don't need to commit per project.
+        # Strip the `documentation:` block from each check entry —
+        # verbose docs URLs that bloat the data file with no per-project
+        # value. yq correctly handles YAML, so we don't have to guess
+        # at indentation.
         x scorecard info --yml "github.com/${sc}" \
-            | sed '/^[[:space:]]*documentation:/d' > /tmp/scorecard.yml
+            | yq 'del(.checks[].documentation)' > /tmp/scorecard.yml
         echo "scorecard-bytes=$(wc -c < /tmp/scorecard.yml)" >> "$GITHUB_OUTPUT"
 
     - name: Concatenate and commit
