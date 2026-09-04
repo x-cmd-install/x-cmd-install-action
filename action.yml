@@ -80,8 +80,17 @@ runs:
         # PATH for subsequent steps. If it's somehow missing, fail
         # loud rather than producing a silent empty loc.yml.
         command -v tokei >/dev/null || { echo "tokei not on PATH" >&2; exit 1; }
+        # Note: x repo loc returns 0 even when tokei fails to produce
+        # any data (e.g. when the upstream is empty / rate-limited).
+        # We can't rely on exit code; verify the output looks like
+        # the expected YAML (must contain `loc:` as a top-level key).
         if ! x repo loc --yml "$OWNER_REPO" > /tmp/loc.yml 2> /tmp/loc.err; then
             echo "loc stage failed (rc=$?):" >&2
+            cat /tmp/loc.err >&2
+            exit 1
+        fi
+        if ! grep -q '^loc:' /tmp/loc.yml; then
+            echo "loc stage produced no data; stderr was:" >&2
             cat /tmp/loc.err >&2
             exit 1
         fi
