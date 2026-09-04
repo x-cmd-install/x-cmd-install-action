@@ -14,10 +14,6 @@ inputs:
       "stedolan/jq" in that case.
     required: false
     default: ''
-  stream:
-    description: 'x-cmd release stream for the installer (x7 = alpha, index.html = stable).'
-    required: false
-    default: 'x7'
   commit-message:
     description: 'Commit message for the data commit.'
     required: false
@@ -34,9 +30,12 @@ runs:
   steps:
     - name: Install x-cmd
       id: install
+      # Hardcoded to x7 (alpha). All callers should ride the latest
+      # x-cmd release stream; the `stream` input was removed in this
+      # iteration to keep behavior consistent across the org.
       uses: x-cmd-action/x-cmd@v1
       with:
-        stream: ${{ inputs.stream }}
+        stream: x7
 
     # x repo loc depends on the `tokei` binary. The x-cmd base install
     # doesn't pull it in — `x env use tokei` is the canonical way to
