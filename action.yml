@@ -68,10 +68,13 @@ runs:
         set -eo pipefail
         . "$HOME/.x-cmd.root/X"
         # x repo loc clones the upstream repo into ~/.x-repo/ then runs
-        # tokei. It can fail for a few reasons (network, disk, missing
-        # upstream) — capture stderr so we can debug from the log.
+        # tokei. Debug the runtime first, then run.
+        echo "PATH=$PATH" >&2
+        echo "x version: $(x rc-version 2>/dev/null || echo unknown)" >&2
+        command -v tokei >&2 || echo "tokei NOT FOUND" >&2
+        command -v git >&2 || echo "git NOT FOUND" >&2
         if ! x repo loc --yml "$OWNER_REPO" > /tmp/loc.yml 2> /tmp/loc.err; then
-            echo "loc stage failed:" >&2
+            echo "loc stage failed (rc=$?):" >&2
             cat /tmp/loc.err >&2
             exit 1
         fi
