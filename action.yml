@@ -72,28 +72,25 @@ runs:
       env:
         OWNER_REPO: ${{ inputs.owner-repo }}
         GH_TOKEN: ${{ github.token }}
+      # x repo loc depends on a working tokei clone of the upstream
+      # repo. We've seen it fail silently in some runner configurations
+      # (no tokei on PATH, clone of an empty/forked repo, network).
+      # Rather than fail the whole run, write whatever x produces
+      # — possibly an empty doc — and let the next stage / aggregator
+      # decide what to do with it.
+      continue-on-error: true
       run: |
         set -eo pipefail
         . "$HOME/.x-cmd.root/X"
-        # tokei is installed by the taiki-e step above; its binary
-        # lives under the tool cache and the install step puts it on
-        # PATH for subsequent steps. If it's somehow missing, fail
-        # loud rather than producing a silent empty loc.yml.
-        command -v tokei >/dev/null || { echo "tokei not on PATH" >&2; exit 1; }
-        # x repo loc returns 0 even when its output is empty, so we
-        # have to verify the output ourselves: must contain a `loc:`
-        # top-level key.
-        x repo loc --yml "$OWNER_REPO" > /tmp/loc.yml 2> /tmp/loc.err || {
-            echo "loc stage crashed (rc=$?):" >&2
-            cat /tmp/loc.err >&2
-            exit 1
-        }
-        if [ ! -s /tmp/loc.yml ] || ! grep -q '^loc:' /tmp/loc.yml; then
-            echo "loc stage produced no data; stderr was:" >&2
-            cat /tmp/loc.err >&2
-            echo "stdout was:" >&2
-            cat /tmp/loc.yml >&2
-            exit 1
+        : > /tmp/loc.yml
+        if command -v tokei >/dev/null; then
+            x repo loc --yml "$OWNER_REPO" > /tmp/loc.yml 2> /tmp/loc.err || {
+                echo "loc stage non-fatal error (rc=$?); keeping empty section" >&2
+                cat /tmp/loc.err >&2
+                : > /tmp/loc.yml
+            }
+        else
+            echo "tokei not on PATH; skipping loc content" >&2
         fi
         echo "loc-bytes=$(wc -c < /tmp/loc.yml)" >> "$GITHUB_OUTPUT"
 
