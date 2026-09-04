@@ -44,7 +44,10 @@ runs:
       env:
         OWNER_REPO: ${{ inputs.owner-repo }}
       run: |
-        set -euo pipefail
+        # Note: no `set -u` here — the X file from x-cmd-action/x-cmd
+        # references unset variables on its first line and would crash
+        # under nounset. We keep errexit + pipefail for safety.
+        set -eo pipefail
         # shellcheck disable=SC1091
         . "$HOME/.x-cmd.root/X"
         x repo card --yml "$OWNER_REPO" > /tmp/card.yml
@@ -57,7 +60,7 @@ runs:
       env:
         OWNER_REPO: ${{ inputs.owner-repo }}
       run: |
-        set -euo pipefail
+        set -eo pipefail
         . "$HOME/.x-cmd.root/X"
         x repo loc --yml "$OWNER_REPO" > /tmp/loc.yml
         echo "loc-bytes=$(wc -c < /tmp/loc.yml)" >> "$GITHUB_OUTPUT"
@@ -69,7 +72,7 @@ runs:
         OWNER_REPO: ${{ inputs.owner-repo }}
         SCORECARD: ${{ inputs.scorecard }}
       run: |
-        set -euo pipefail
+        set -eo pipefail
         . "$HOME/.x-cmd.root/X"
         # If scorecard input is empty, default to owner-repo. The
         # github.com/ prefix is what the openssf API expects.
@@ -87,7 +90,7 @@ runs:
       env:
         COMMIT_MSG: ${{ inputs.commit-message }}
       run: |
-        set -euo pipefail
+        set -eo pipefail
         d=$(date -u +%y%m%d)
         out="data/${d}.yml"
         mkdir -p data
