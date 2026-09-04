@@ -1,88 +1,110 @@
 name: 'x-cmd-install-action'
-description: 'Composite action that runs card → loc → sync for an x-cmd-install/<software> repo.'
+description: 'Composite action that runs card → loc → scorecard for an x-cmd-install/<software> repo, then commits the concatenated YAML to data/<YYMMDD>.yml.'
 
 inputs:
   owner-repo:
-    description: 'x-cmd-install/<software> form. Caller passes github.repository explicitly.'
+    description: 'Upstream owner/repo (e.g. jqlang/jq). Used by card and loc stages.'
     required: true
-  days:
-    description: 'Width of the middle window in `recent:` (lastNd).'
+  scorecard:
+    description: |
+      GitHub owner/repo path for the OpenSSF scorecard API. Defaults to
+      owner-repo. May differ when a project was renamed — e.g. jq moved
+      from github.com/stedolan/jq to github.com/jqlang/jq, but the
+      scorecard backend still tracks the historical name. Set to
+      "stedolan/jq" in that case.
     required: false
-    default: '90'
-  stages:
-    description: 'Comma-separated subset of card,loc,sync.'
+    default: ''
+  stream:
+    description: 'x-cmd release stream for the installer (x7 = alpha, index.html = stable).'
     required: false
-    default: 'card'
-  sourcecode-org:
-    description: 'Org that receives the sync stage push.'
-    required: false
-    default: 'x-cmd-sourcecode'
+    default: 'x7'
   commit-message:
     description: 'Commit message for the data commit.'
     required: false
     default: 'card: collect <YYMMDD> snapshot'
 
 outputs:
-  card-path:
-    description: 'Path to the rendered card YAML inside the runner.'
-  loc-path:
-    description: 'Path to the LOC YAML (only set if loc stage ran).'
-  synced:
-    description: 'true if the sync stage pushed successfully.'
+  data-path:
+    description: 'Path to the concatenated YAML inside the runner.'
   collected-at:
-    description: 'ISO-8601 timestamp of when card ran.'
+    description: 'ISO-8601 timestamp of when the card stage ran.'
 
 runs:
   using: 'composite'
   steps:
+    - name: Install x-cmd
+      id: install
+      uses: x-cmd-action/x-cmd@v1
+      with:
+        stream: ${{ inputs.stream }}
+
     - name: Run card stage
       id: card
-      if: ${{ contains(inputs.stages, 'card') }}
       shell: bash
       env:
         OWNER_REPO: ${{ inputs.owner-repo }}
-        DAYS: ${{ inputs.days }}
-        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        # shellcheck disable=SC1091
+        . "$HOME/.x-cmd.root/X"
+        x repo card --yml "$OWNER_REPO" > /tmp/card.yml
+        echo "card-bytes=$(wc -c < /tmp/card.yml)" >> "$GITHUB_OUTPUT"
+        echo "collected-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+    - name: Run loc stage
+      id: loc
+      shell: bash
+      env:
+        OWNER_REPO: ${{ inputs.owner-repo }}
+      run: |
+        set -euo pipefail
+        . "$HOME/.x-cmd.root/X"
+        x repo loc --yml "$OWNER_REPO" > /tmp/loc.yml
+        echo "loc-bytes=$(wc -c < /tmp/loc.yml)" >> "$GITHUB_OUTPUT"
+
+    - name: Run scorecard stage
+      id: scorecard
+      shell: bash
+      env:
+        OWNER_REPO: ${{ inputs.owner-repo }}
+        SCORECARD: ${{ inputs.scorecard }}
+      run: |
+        set -euo pipefail
+        . "$HOME/.x-cmd.root/X"
+        # If scorecard input is empty, default to owner-repo. The
+        # github.com/ prefix is what the openssf API expects.
+        sc="${SCORECARD:-$OWNER_REPO}"
+        # Strip the `documentation:` block from each check entry; it's
+        # verbose docs URLs we don't need to commit per project.
+        x scorecard info --yml "github.com/${sc}" \
+            | sed '/^[[:space:]]*documentation:/d' > /tmp/scorecard.yml
+        echo "scorecard-bytes=$(wc -c < /tmp/scorecard.yml)" >> "$GITHUB_OUTPUT"
+
+    - name: Concatenate and commit
+      shell: bash
+      env:
+        COMMIT_MSG: ${{ inputs.commit-message }}
       run: |
         set -euo pipefail
         d=$(date -u +%y%m%d)
         out="data/${d}.yml"
         mkdir -p data
 
-        # Delegate to the inlined jq filter (card.jq + card.sh). The
-        # bundle lives next to this action.yml so no PATH or install
-        # step is needed on the runner.
-        "${{ github.action_path }}/scripts/card.sh" "$OWNER_REPO" "$DAYS" > "$out"
+        {
+          cat /tmp/card.yml
+          printf -- '---\n'
+          cat /tmp/loc.yml
+          printf -- '---\n'
+          cat /tmp/scorecard.yml
+        } > "$out"
 
-        echo "card-path=$out" >> "$GITHUB_OUTPUT"
-        echo "collected-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+        echo "data-path=$out" >> "$GITHUB_OUTPUT"
 
-    - name: Run loc stage (stub)
-      id: loc
-      if: ${{ contains(inputs.stages, 'loc') }}
-      shell: bash
-      run: |
-        # TODO: clone upstream at HEAD, run cloc, write data/<YYMMDD>.loc.yml.
-        echo "loc-path=(not yet implemented)" >> "$GITHUB_OUTPUT"
-
-    - name: Run sync stage (stub)
-      id: sync
-      if: ${{ contains(inputs.stages, 'sync') }}
-      shell: bash
-      env:
-        SOURCECODE_ORG: ${{ inputs.sourcecode-org }}
-      run: |
-        # TODO: cross-org push of data/ to ${SOURCECODE_ORG}/<software>.
-        echo "synced=false" >> "$GITHUB_OUTPUT"
-
-    - name: Commit data/
-      shell: bash
-      run: |
         if git status --porcelain -- data/ | grep -q .; then
             git config user.name  "x-cmd-install-bot"
             git config user.email "bot@x-cmd.com"
             git add data/
-            git commit -m "${{ inputs.commit-message }}"
+            git commit -m "$COMMIT_MSG"
             git push
         else
             echo "no data changes to commit"

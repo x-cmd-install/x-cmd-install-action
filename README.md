@@ -3,13 +3,32 @@
 > The single source of truth for `x-cmd-install/<software>` data collection.
 
 A composite GitHub Action that every `x-cmd-install/<software>` repo's
-workflow calls. Right now each repo runs its own copy of the card / LOC /
-sync pipeline, copied from `.x-cmd/workflow/card.sh` at deploy time. That
-works for ~50 repos; it falls apart at ~2000 (drift between deployed
-copies, version skew, surprise bug behavior). This action replaces those
-copies with one callable.
+workflow calls. It installs `x-cmd` (via `x-cmd-action/x-cmd`), runs
+three stages — `card`, `loc`, `scorecard` — and commits the
+concatenated YAML to `data/<YYMMDD>.yml`.
 
----
+```
+┌─────────────────────────────────────────────┐
+│           x-cmd-install-action              │
+│                                             │
+│  1. install  x-cmd-action/x-cmd@v1         │
+│           (stream: x7 by default)           │
+│                                             │
+│  2. card     x repo card --yml OWNER        │
+│           → /tmp/card.yml                   │
+│                                             │
+│  3. loc      x repo loc  --yml OWNER        │
+│           → /tmp/loc.yml                    │
+│                                             │
+│  4. scorecard x scorecard info --yml        │
+│            github.com/SCORECARD             │
+│           → /tmp/scorecard.yml              │
+│             (documentation: blocks stripped)│
+│                                             │
+│  5. concat   cat card --- loc --- scorecard │
+│           → data/<YYMMDD>.yml (commit+push) │
+└─────────────────────────────────────────────┘
+```
 
 ## Why this exists
 
@@ -26,59 +45,16 @@ x-cmd-install-stat                # this repo, aggregator
       └─ writes stat/<software>/latest.card.yml
 ```
 
-The pain points:
+The pain points the action fixes:
 
-1. **Drift across 2093 deployed workflows.** When we fixed
-   `card_commit_counts` (the `.days` 404 crash) on `x-bash/repo`, the fix
-   only landed in *future* deploys. Existing upstream repos kept running
-   the buggy version until manually re-deployed. The fix only showed up
-   in `x-cmd-install-stat` once each upstream re-ran its workflow.
-
-2. **Cross-cutting features cost N edits.** Adding "track LOC" or "push
-   to x-cmd-sourcecode" today means editing the template in
-   `deploy-workflow.sh`, re-running it across all 2093 repos, and hoping
-   everyone re-pulls.
-
-3. **No version pinning.** Each upstream's workflow is whatever was
-   current at deploy time. There's no way to say "use card v3, with the
-   strict-YAML fix" — they all just call `x repo card` and hope.
-
-This action fixes all three: callers pin a tag, the action does the
-work, behavior changes ship once.
-
----
-
-## What it does
-
-The action runs three stages, each producing an output the next stage
-consumes:
-
-```
-                ┌─────────────────────────────────────────────┐
-                │              x-cmd-install-action           │
-                │                                             │
-   input   ──►  │  1. card    x repo card <repo>              │
-                │           → /tmp/card.yml                   │
-                │           → data/<YYMMDD>.yml (commit)      │
-                │                                             │
-                │  2. loc     (planned)                       │
-                │           git ls-files + cloc               │
-                │           → data/<YYMMDD>.loc.yml            │
-                │           → commit                          │
-                │                                             │
-                │  3. sync     (planned)                      │
-                │           push data/ to x-cmd-sourcecode/   │
-                │                                             │
-                │           outputs: card_path, loc_path,      │
-                │                    synced, collected_at      │
-                └─────────────────────────────────────────────┘
-```
-
-Stages can be individually disabled via input flags, so a downstream
-consumer that only wants card output (today's main use) doesn't pay for
-the other stages.
-
----
+1. **Drift across 2093 deployed workflows.** Bug fixes only land in
+   future deploys; existing copies keep running the buggy version.
+2. **Cross-cutting features cost N edits.** Adding "track LOC" or "pull
+   scorecard" today means editing the template in `deploy-workflow.sh`
+   and re-running it across all 2093 repos.
+3. **No version pinning.** Each workflow uses whatever was current at
+   deploy time. Pinning to `@main` (or `@v1.x.y`) flips the dial from
+   "behaviour floats" to "behaviour is whatever main says right now."
 
 ## Usage
 
@@ -87,7 +63,7 @@ the other stages.
 name: card
 on:
   schedule:
-    - cron: '5 0 * * *'      # 00:05 UTC, after the upstream workflow window
+    - cron: '5 0 * * *'      # 00:05 UTC, after upstream window
   workflow_dispatch:
 
 permissions:
@@ -99,63 +75,80 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Collect card + LOC + sync
+      # Pin to a tag for stable behavior, or @main to ride the latest.
+      - name: Collect card + loc + scorecard
         uses: x-cmd-install/x-cmd-install-action@v1
         with:
-          owner-repo: ${{ github.repository }}     # x-cmd-install/<software>
-          days: 90
-          stages: 'card,loc,sync'
-          sourcecode-org: x-cmd-sourcecode
+          owner-repo: jqlang/jq
+          # Optional: override the GitHub path used for scorecard.
+          # Stays empty unless the project was renamed.
+          scorecard: stedolan/jq
 ```
 
-That's the entire per-repo workflow. No bash, no jq, no card.sh copy —
-just pin a version and call.
-
----
+That's the entire per-repo workflow. No bash, no jq, no card.sh copy.
 
 ## Inputs
 
 | name | required | default | description |
 |---|---|---|---|
-| `owner-repo` | yes | — | `x-cmd-install/<software>` form. The action runs in the calling repo so this is normally `${{ github.repository }}`. |
-| `days` | no | `90` | Width of the middle window in `recent:` (`lastNd`). Used by `card`. |
-| `stages` | no | `card` | Comma-separated subset of `card,loc,sync`. Run only the listed stages. |
-| `sourcecode-org` | no | `x-cmd-sourcecode` | Org that receives the `sync` push. |
+| `owner-repo` | yes | — | Upstream `owner/repo` (e.g. `jqlang/jq`). Used by card and loc stages. |
+| `scorecard` | no | `""` | GitHub path for the OpenSSF scorecard API. Defaults to `owner-repo`. May differ when a project was renamed — e.g. `jqlang/jq` upstream but `github.com/stedolan/jq` on the scorecard backend. |
+| `stream` | no | `x7` | x-cmd release stream passed to `x-cmd-action/x-cmd`. `index.html` for stable, `x7` for alpha, `x1`–`x6` for older experimental builds. |
 | `commit-message` | no | `card: collect <YYMMDD> snapshot` | Commit message for the data commit. |
 
 ## Outputs
 
 | name | description |
 |---|---|
-| `card-path` | Path to the rendered card YAML inside the runner (for debugging / artifact upload). |
-| `loc-path` | Path to the LOC YAML (only set if `loc` stage ran). |
-| `synced` | `true` if the sync stage pushed successfully. |
-| `collected-at` | ISO-8601 timestamp of when `card` ran. |
+| `data-path` | Path to the concatenated YAML inside the runner (`data/<YYMMDD>.yml`). |
+| `collected-at` | ISO-8601 timestamp of when the card stage ran. |
 
+## Output format
+
+Three YAML documents concatenated with `---`:
+
+```yaml
+about:                                        # x repo card output
+  description: |
+    Command-line JSON processor
+  license: NOASSERTION
+  homepage: https://jqlang.org
+  head: 9d241e2
+  ...
 ---
-
-## Outputs in the upstream repo
-
-After a successful run, the calling repo (`x-cmd-install/<software>`)
-gains two committed artifacts:
-
-```
-data/
-  ├─ 260901.yml     # card snapshot (today's run)
-  └─ 260901.loc.yml # LOC snapshot (when loc stage enabled)
-```
-
-These are picked up by `x-cmd-install-stat/.x-cmd/sync.sh` (raw CDN
-pull, no API) the next time it runs.
-
+path: /Users/l/.x-repo/github.com/jqlang/jq    # x repo loc output
+loc:
+  C:
+    code: 30415
+    comments: 7836
+    ...
+total:
+  code: 54000
+  comments: 9000
+  blanks: 5500
+  files: 100
 ---
+date: "2026-08-24"                            # x scorecard output
+repo:
+  name: github.com/stedolan/jq
+score: 5.4
+checks:
+  - name: Maintained
+    score: 10
+    reason: ...
+    # documentation: blocks stripped per stage
+```
+
+Each section parses independently with `yq -r .about`, `.loc`,
+`.checks`. The aggregator (`x-cmd-install-stat/.x-cmd/sync.sh`) folds
+the first section into `stat/<software>/latest.card.yml`.
 
 ## Relationship to other repos
 
 ```
 x-bash/repo               # source of truth for `x repo card` (the CLI)
+x-cmd-action/x-cmd        # standalone action to install x-cmd (used here)
        │
-       │  (action bundles the runtime + jq filter)
        ▼
 x-cmd-install-action      # THIS REPO — composite action
        │
@@ -170,26 +163,8 @@ x-cmd-install-stat        # aggregator: writes stat/<software>/latest.card.yml
 ```
 
 The action is the **choke point** — any change to card format, LOC
-schema, or sync behavior lands here and propagates everywhere on the next
-tag.
-
----
-
-## Roadmap
-
-- [x] **Stage 1: card** — replaced today with a thin shim around `x repo card`.
-- [ ] **Stage 2: loc** — clone upstream at HEAD, run cloc, commit
-      `data/<YYMMDD>.loc.yml` with the same date stamp. Schema TBD but
-      will mirror card's `about:` / `timeline:` shape so stat can fold
-      them in.
-- [ ] **Stage 3: sync** — push `data/` tree to `x-cmd-sourcecode/<software>`
-      via cross-org dispatch. Output is fan-out, not single push, so
-      each upstream gets its own mirror.
-- [ ] **Stage 4: refined tracking** — once LOC is in place, derive
-      per-language growth / per-directory churn / contributor matrix.
-      All opt-in, all additive to the existing card output.
-
----
+schema, or scorecard output lands here and propagates everywhere on
+the next tag.
 
 ## Versioning
 
@@ -206,34 +181,14 @@ The action follows semver:
 Callers pin a major (`@v1`) for stability or a tag (`@v1.4.2`) when
 they want a specific fix.
 
----
+## Why composite + x-cmd-action
 
-## Why "composite" not "docker" or "javascript"
-
-Composite actions are bash + jq over GitHub-hosted runners — exactly
-what the card pipeline already needs. A Docker action would force every
-caller to wait for a `docker build` of an image that contains jq,
-curl, and git, just to call a CLI. A JavaScript action would force a
-tool that's currently pure POSIX shell into Node's standard library.
-Composite keeps the dep surface empty and the cold-start cost low
-(~3s vs ~30s for Docker).
-
-The trade-off: composite actions can't have private state between
-steps outside the filesystem. That's fine here — each stage reads its
-input from a known path and writes its output to another, with the
-GitHub Actions engine passing outputs between them.
-
----
-
-## Local development
-
-To iterate on the action without waiting on a tag push:
-
-```bash
-git clone https://github.com/x-cmd-install/x-cmd-install-action
-cd x-cmd-install-action
-./scripts/test-action.sh        # runs the action against a fixture repo
-```
-
-`scripts/test-action.sh` (TODO) will set up `x-cmd-install/_fixture`
-locally and exercise the action with `act` or by simulating a runner.
+- **Composite over Docker**: a Docker action would force every caller
+  to wait for `docker build` of an image that already contains the
+  x-cmd runtime. Composite keeps the dep surface empty and the
+  cold-start cost low (~3s vs ~30s).
+- **x-cmd-action over hand-rolled curl**: the upstream
+  `x-cmd-action/x-cmd@v1` action is idempotent — it skips the
+  install if x-cmd is already present in the runner image, and the
+  `stream` input lets us pin to alpha (`x7`) or stable (`index.html`)
+  per call.
