@@ -1,19 +1,7 @@
 name: 'x-cmd-install-action'
-description: 'Composite action that runs card → loc → scorecard for an x-cmd-install/<software> repo, then commits the concatenated YAML to data/<YYMMDD>.yml.'
+description: 'Composite action that runs card → loc → scorecard for an x-cmd-install/<software> repo, then commits the concatenated YAML to data/<YYMMDD>.yml. Reads upstream from .x-cmd/fskv/ownerrepo and (optionally) scorecard from .x-cmd/fskv/scorecard_ownerrepo — no inputs required.'
 
 inputs:
-  owner-repo:
-    description: 'Upstream owner/repo (e.g. jqlang/jq). Used by card and loc stages.'
-    required: true
-  scorecard:
-    description: |
-      GitHub owner/repo path for the OpenSSF scorecard API. Defaults to
-      owner-repo. May differ when a project was renamed — e.g. jq moved
-      from github.com/stedolan/jq to github.com/jqlang/jq, but the
-      scorecard backend still tracks the historical name. Set to
-      "stedolan/jq" in that case.
-    required: false
-    default: ''
   commit-message:
     description: 'Commit message for the data commit.'
     required: false
@@ -28,6 +16,23 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    # Read upstream owner/repo from the caller's .x-cmd/fskv/. This is
+    # the predefined metadata store; the action treats the values as
+    # immutable per-repo. We also read scorecard_ownerrepo if it
+    # exists (set when the upstream was renamed), otherwise fall back
+    # to the same owner-repo path.
+    - name: Read upstream from fskv
+      id: fskv
+      shell: bash
+      run: |
+        set -eo pipefail
+        OWNER_REPO=$(cat .x-cmd/fskv/ownerrepo)
+        SCORECARD_REPO=$(cat .x-cmd/fskv/scorecard_ownerrepo 2>/dev/null || echo "$OWNER_REPO")
+        echo "owner-repo=$OWNER_REPO"
+        echo "scorecard=$SCORECARD_REPO"
+        echo "owner-repo=$OWNER_REPO" >> "$GITHUB_OUTPUT"
+        echo "scorecard=$SCORECARD_REPO" >> "$GITHUB_OUTPUT"
+
     - name: Install x-cmd
       id: install
       # Hardcoded to x7 (alpha). All callers should ride the latest
@@ -54,7 +59,7 @@ runs:
       id: card
       shell: bash
       env:
-        OWNER_REPO: ${{ inputs.owner-repo }}
+        OWNER_REPO: ${{ steps.fskv.outputs.owner-repo }}
         # x-cmd reads GH_TOKEN first, falling back to GITHUB_TOKEN.
         # The runner's GITHUB_TOKEN gives 1000 req/h per repo —
         # enough for the 2 API calls card makes per run.
@@ -74,7 +79,7 @@ runs:
       id: loc
       shell: bash
       env:
-        OWNER_REPO: ${{ inputs.owner-repo }}
+        OWNER_REPO: ${{ steps.fskv.outputs.owner-repo }}
         GH_TOKEN: ${{ github.token }}
       # x repo loc depends on a working tokei clone of the upstream
       # repo. We've seen it fail silently in some runner configurations
@@ -107,19 +112,16 @@ runs:
       id: scorecard
       shell: bash
       env:
-        OWNER_REPO: ${{ inputs.owner-repo }}
-        SCORECARD: ${{ inputs.scorecard }}
+        OWNER_REPO: ${{ steps.fskv.outputs.owner-repo }}
+        SCORECARD_REPO: ${{ steps.fskv.outputs.scorecard }}
       run: |
         set -eo pipefail
         . "$HOME/.x-cmd.root/X"
-        # If scorecard input is empty, default to owner-repo. The
-        # github.com/ prefix is what the openssf API expects.
-        sc="${SCORECARD:-$OWNER_REPO}"
         # Strip the `documentation:` block from each check entry —
         # verbose docs URLs that bloat the data file with no per-project
         # value. yq correctly handles YAML, so we don't have to guess
         # at indentation.
-        x scorecard info --yml "github.com/${sc}" \
+        x scorecard info --yml "github.com/${SCORECARD_REPO}" \
             | yq 'del(.checks[].documentation)' > /tmp/scorecard.yml
         echo "scorecard-bytes=$(wc -c < /tmp/scorecard.yml)" >> "$GITHUB_OUTPUT"
 
