@@ -225,15 +225,24 @@ runs:
         cp /tmp/release/latest.release.raw.json data/release/latest.release.raw.json 2>/dev/null || true
 
         # Build latest.report.yml = card YAML + --- + release JSON → YAML.
-        # yq handles the JSON→YAML conversion on the release side; the
-        # card side is already valid multi-doc YAML. We just cat them
-        # together with a `---` separator.
+        # Before converting, strip any KEY whose name contains 'url'
+        # (case-insensitive), including the literal 'url' key. The
+        # nested object bodies under those keys are dropped wholesale.
+        # URLs in the release JSON bloat the merged report by 2-3x
+        # and aren't useful for most downstream consumers. The raw
+        # release JSON at data/release/latest.release.raw.json stays
+        # untouched — only the report.yml sees the trimmed view.
         if [ -s /tmp/release/latest.release.raw.json ]; then
+            # Strip every key whose name contains 'url' (case-insens).
+            # Uses Python because yq's recursive delete is too eager.
+            python3 "$GITHUB_ACTION_PATH/scripts/strip_url_keys.py" \
+                < /tmp/release/latest.release.raw.json \
+                | tee /tmp/release.stripped.json > /dev/null
             {
                 cat "$out_card"
                 printf -- '---\n'
-                yq -P '.' /tmp/release/latest.release.raw.json
-            } > data/latest.report.yml
+                yq -P '.' /tmp/release.stripped.json
+            } | tee data/latest.report.yml > /dev/null
         else
             cp "$out_card" data/latest.report.yml
         fi
