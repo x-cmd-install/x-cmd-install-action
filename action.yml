@@ -193,19 +193,23 @@ runs:
         set -eo pipefail
         d=$(date -u +%y%m%d)
 
-        # New layout (as of v0.4):
+        # New layout (v0.4 → v0.5):
         #   data/
-        #     ├── card/
-        #     │   └── <YYMMDD>.yml          (4 sections: card + loc + scorecard + eget)
-        #     └── release/
-        #         └── latest.release.raw.json   (full GitHub /releases/latest JSON)
+        #     ├── card/<YYMMDD>.yml           (4 sections: card + loc + scorecard + eget)
+        #     ├── release/latest.release.raw.json   (raw GitHub API)
+        #     └── summary/latest.report.json  (merged view: card as JSON + release)
         #
         # The flat data/<YYMMDD>.yml path is kept during the transition
         # window so old aggregator builds keep working. A follow-up
         # batch will move the historical files to data/history/ and
-        # switch the aggregator to data/card/<YYMMDD>.yml.
+        # drop the flat path.
+        #
+        # The summary file is the single read path for the aggregator
+        # — it carries the same card fields (as JSON) plus the release
+        # fields, so the aggregator can pull one CDN request per mirror
+        # instead of two.
 
-        mkdir -p data/card data/release
+        mkdir -p data/card data/release data/summary
 
         out_card="data/card/${d}.yml"
         {
@@ -220,7 +224,26 @@ runs:
 
         cp /tmp/release/latest.release.raw.json data/release/latest.release.raw.json 2>/dev/null || true
 
+        # summary/latest.report.json — merged card+release. jql parses
+        # the 4-section card YAML and the raw release JSON, then
+        # combines them under top-level "card" and "release" keys.
+        # If either source is missing/empty, the merge still
+        # succeeds with an empty object for that key.
+        mkdir -p /tmp/summary
+        card_json="{}"
+        [ -s "$out_card" ] && card_json=$(yq -o=json -I=0 '.' "$out_card" 2>/dev/null || echo "{}")
+        release_json="{}"
+        [ -s /tmp/release/latest.release.raw.json ] && release_json=$(cat /tmp/release/latest.release.raw.json 2>/dev/null || echo "{}")
+        # If card has multi-line content (description etc), yq -I=0
+        # already collapses it onto one line, so jq can slurp both
+        # objects without parse errors.
+        yq -n -I=0 --argjson card "$card_json" --argjson release "$release_json" \
+            '{"card": $card, "release": $release}' > /tmp/summary/latest.report.json
+
+        cp /tmp/summary/latest.report.json data/summary/latest.report.json
+
         echo "card-data-path=$out_card" >> "$GITHUB_OUTPUT"
+        echo "summary-data-path=data/summary/latest.report.json" >> "$GITHUB_OUTPUT"
 
         if git status --porcelain -- data/ | grep -q .; then
             git config user.name  "x-cmd-install-bot"
