@@ -125,6 +125,29 @@ runs:
             | yq 'del(.checks[].documentation)' > /tmp/scorecard.yml
         echo "scorecard-bytes=$(wc -c < /tmp/scorecard.yml)" >> "$GITHUB_OUTPUT"
 
+    # 4th section: eget asset map. For each of the 6 platform/CPU
+    # combos (darwin/linux × arm64/amd64 × musl/gnu), pick the best
+    # release asset eget would actually download. Pure read-only
+    # diagnostic — doesn't affect eget's download choice, but useful
+    # for tracking cross-platform coverage. Soft-fail on eget errors.
+    - name: Run eget asset map stage
+      id: eget
+      continue-on-error: true
+      shell: bash
+      env:
+        OWNER_REPO: ${{ steps.fskv.outputs.owner-repo }}
+      run: |
+        set -eo pipefail
+        . "$HOME/.x-cmd.root/X"
+        : > /tmp/eget.yml
+        if x eget lsassetmap --yml "$OWNER_REPO" > /tmp/eget.yml 2> /tmp/eget.err; then
+            echo "eget-bytes=$(wc -c < /tmp/eget.yml)" >> "$GITHUB_OUTPUT"
+        else
+            echo "eget lsassetmap failed (rc=$?); keeping empty section" >&2
+            cat /tmp/eget.err >&2
+            : > /tmp/eget.yml
+        fi
+
     - name: Concatenate and commit
       shell: bash
       env:
@@ -141,6 +164,8 @@ runs:
           cat /tmp/loc.yml
           printf -- '---\n'
           cat /tmp/scorecard.yml
+          printf -- '---\n'
+          cat /tmp/eget.yml
         } > "$out"
 
         echo "data-path=$out" >> "$GITHUB_OUTPUT"
