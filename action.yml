@@ -130,6 +130,10 @@ runs:
     # release asset eget would actually download. Pure read-only
     # diagnostic — doesn't affect eget's download choice, but useful
     # for tracking cross-platform coverage. Soft-fail on eget errors.
+    #
+    # NB: do NOT pass --yml here. The x7 stream's `x eget lsassetmap`
+    # doesn't accept --yml (it was renamed/removed in this version);
+    # its default output is already YAML-shaped, which yq parses fine.
     - name: Run eget asset map stage
       id: eget
       continue-on-error: true
@@ -140,12 +144,45 @@ runs:
         set -eo pipefail
         . "$HOME/.x-cmd.root/X"
         : > /tmp/eget.yml
-        if x eget lsassetmap --yml "$OWNER_REPO" > /tmp/eget.yml 2> /tmp/eget.err; then
+        if x eget lsassetmap "$OWNER_REPO" > /tmp/eget.yml 2> /tmp/eget.err; then
             echo "eget-bytes=$(wc -c < /tmp/eget.yml)" >> "$GITHUB_OUTPUT"
         else
             echo "eget lsassetmap failed (rc=$?); keeping empty section" >&2
             cat /tmp/eget.err >&2
             : > /tmp/eget.yml
+        fi
+
+    # 5th stage: raw GitHub release metadata for the upstream.
+    # Writes the full JSON response from
+    #   GET https://api.github.com/repos/<owner>/<repo>/releases/latest
+    # to data/release/latest.release.raw.json. Untouched (no key
+    # renaming, no schema validation) so downstream consumers can parse
+    # the canonical GitHub shape.
+    #
+    # Auth: GITHUB_TOKEN gives 5000 req/h; we make 1 request per run,
+    # 1 run per day per mirror, so 2088 req/day for the whole org —
+    # well under the user-token quota and under the per-repo GITHUB_TOKEN
+    # quota.
+    - name: Fetch latest release metadata
+      id: release
+      continue-on-error: true
+      shell: bash
+      env:
+        OWNER_REPO: ${{ steps.fskv.outputs.owner-repo }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -eo pipefail
+        mkdir -p /tmp/release
+        out_rel="/tmp/release/latest.release.raw.json"
+        if curl -sSfL -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${OWNER_REPO}/releases/latest" \
+              > "$out_rel" 2> /tmp/release.err; then
+            echo "release-bytes=$(wc -c < "$out_rel")" >> "$GITHUB_OUTPUT"
+        else
+            echo "release fetch failed (rc=$?); keeping empty file" >&2
+            cat /tmp/release.err >&2
+            : > "$out_rel"
         fi
 
     - name: Concatenate and commit
@@ -155,9 +192,22 @@ runs:
       run: |
         set -eo pipefail
         d=$(date -u +%y%m%d)
-        out="data/${d}.yml"
-        mkdir -p data
 
+        # New layout (as of v0.4):
+        #   data/
+        #     ├── card/
+        #     │   └── <YYMMDD>.yml          (4 sections: card + loc + scorecard + eget)
+        #     └── release/
+        #         └── latest.release.raw.json   (full GitHub /releases/latest JSON)
+        #
+        # The flat data/<YYMMDD>.yml path is kept during the transition
+        # window so old aggregator builds keep working. A follow-up
+        # batch will move the historical files to data/history/ and
+        # switch the aggregator to data/card/<YYMMDD>.yml.
+
+        mkdir -p data/card data/release
+
+        out_card="data/card/${d}.yml"
         {
           cat /tmp/card.yml
           printf -- '---\n'
@@ -166,9 +216,11 @@ runs:
           cat /tmp/scorecard.yml
           printf -- '---\n'
           cat /tmp/eget.yml
-        } > "$out"
+        } > "$out_card"
 
-        echo "data-path=$out" >> "$GITHUB_OUTPUT"
+        cp /tmp/release/latest.release.raw.json data/release/latest.release.raw.json 2>/dev/null || true
+
+        echo "card-data-path=$out_card" >> "$GITHUB_OUTPUT"
 
         if git status --porcelain -- data/ | grep -q .; then
             git config user.name  "x-cmd-install-bot"
