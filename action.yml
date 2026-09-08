@@ -152,43 +152,6 @@ runs:
             : > /tmp/eget.yml
         fi
 
-    # DEBUG: print yq version + sample conversion to diagnose the
-    # JSON-instead-of-YAML issue in report.yml.
-    - name: DEBUG yq diagnostics
-      if: always()
-      shell: bash
-      run: |
-        set +e
-        echo "yq: $(which yq) $(yq --version 2>&1)"
-        echo "PATH: $PATH"
-        echo "---"
-        echo '{"a":1,"b":2}' | yq -P '.'
-        echo "---"
-        echo '{"a":1,"b":2}' | yq -P -I=0 '.'
-        echo "---"
-        # show the action's x-cmd yq (if accessible)
-        if command -v xyq >/dev/null 2>&1; then
-            echo "xyq present"
-        else
-            echo "xyq NOT in PATH"
-        fi
-        if command -v x >/dev/null 2>&1; then
-            echo "x yq: $(x yq --version 2>&1)"
-            echo '{"a":1,"b":2}' | x yq -P '.'
-        fi
-        true
-
-    # 5th stage: raw GitHub release metadata for the upstream.
-    # Writes the full JSON response from
-    #   GET https://api.github.com/repos/<owner>/<repo>/releases/latest
-    # to data/release/latest.release.raw.json. Untouched (no key
-    # renaming, no schema validation) so downstream consumers can parse
-    # the canonical GitHub shape.
-    #
-    # Auth: GITHUB_TOKEN gives 5000 req/h; we make 1 request per run,
-    # 1 run per day per mirror, so 2088 req/day for the whole org —
-    # well under the user-token quota and under the per-repo GITHUB_TOKEN
-    # quota.
     - name: Fetch latest release metadata
       id: release
       continue-on-error: true
@@ -255,11 +218,13 @@ runs:
         # the release section are stripped first to keep the file
         # compact.
         if [ -s /tmp/release/latest.release.raw.json ]; then
-            # Strip every key whose name contains 'url' (case-insens).
-            # Uses Python because yq's recursive delete is too eager.
+            # Strip url* keys, then emit YAML directly. The Python
+            # script does both the url-strip AND the JSON→YAML
+            # conversion (avoids the yq -P bug where it silently
+            # falls back to JSON for the GitHub release payload).
             python3 "$GITHUB_ACTION_PATH/scripts/strip_url_keys.py" \
                 < /tmp/release/latest.release.raw.json \
-                | tee /tmp/release.stripped.json > /dev/null
+                | tee /tmp/release.stripped.yaml > /dev/null
             {
                 # First 3 docs: card data only — eget is excluded
                 # (it's diagnostic noise for downstream consumers).
@@ -268,9 +233,9 @@ runs:
                 cat /tmp/loc.yml
                 printf -- '---\n'
                 cat /tmp/scorecard.yml
-                # 4th doc: release JSON → YAML
+                # 4th doc: release (already YAML after the script)
                 printf -- '---\n'
-                yq -P '.' /tmp/release.stripped.json
+                cat /tmp/release.stripped.yaml
             } | tee data/latest.report.yml > /dev/null
         else
             # No release available — just emit the 3 card docs
