@@ -251,6 +251,18 @@ runs:
         echo "card-data-path=$out_card" >> "$GITHUB_OUTPUT"
         echo "report-data-path=data/latest.report.yml" >> "$GITHUB_OUTPUT"
 
+        # NDJSON form of the same merged view: one JSON object per line
+        # in the same order (card, loc, scorecard, release if any).
+        # yq converts each YAML doc to single-line JSON; the release
+        # JSON is already in that shape from strip_url_keys.py. Empty
+        # inputs are skipped, so the output is 1–4 lines.
+        {
+            yq -o=json -I=0 '.' /tmp/card.yml
+            yq -o=json -I=0 '.' /tmp/loc.yml
+            yq -o=json -I=0 '.' /tmp/scorecard.yml
+            [ -s /tmp/release.stripped.json ] && cat /tmp/release.stripped.json
+        } > data/latest.report.json
+
         if git status --porcelain -- data/ | grep -q .; then
             git config user.name  "x-cmd-install-bot"
             git config user.email "bot@x-cmd.com"
