@@ -152,6 +152,32 @@ runs:
             : > /tmp/eget.yml
         fi
 
+    # DEBUG: print yq version + sample conversion to diagnose the
+    # JSON-instead-of-YAML issue in report.yml.
+    - name: DEBUG yq diagnostics
+      if: always()
+      shell: bash
+      run: |
+        set +e
+        echo "yq: $(which yq) $(yq --version 2>&1)"
+        echo "PATH: $PATH"
+        echo "---"
+        echo '{"a":1,"b":2}' | yq -P '.'
+        echo "---"
+        echo '{"a":1,"b":2}' | yq -P -I=0 '.'
+        echo "---"
+        # show the action's x-cmd yq (if accessible)
+        if command -v xyq >/dev/null 2>&1; then
+            echo "xyq present"
+        else
+            echo "xyq NOT in PATH"
+        fi
+        if command -v x >/dev/null 2>&1; then
+            echo "x yq: $(x yq --version 2>&1)"
+            echo '{"a":1,"b":2}' | x yq -P '.'
+        fi
+        true
+
     # 5th stage: raw GitHub release metadata for the upstream.
     # Writes the full JSON response from
     #   GET https://api.github.com/repos/<owner>/<repo>/releases/latest
