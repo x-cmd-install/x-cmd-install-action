@@ -224,14 +224,10 @@ runs:
 
         cp /tmp/release/latest.release.raw.json data/release/latest.release.raw.json 2>/dev/null || true
 
-        # Build latest.report.yml = card YAML + --- + release JSON → YAML.
-        # Before converting, strip any KEY whose name contains 'url'
-        # (case-insensitive), including the literal 'url' key. The
-        # nested object bodies under those keys are dropped wholesale.
-        # URLs in the release JSON bloat the merged report by 2-3x
-        # and aren't useful for most downstream consumers. The raw
-        # release JSON at data/release/latest.release.raw.json stays
-        # untouched — only the report.yml sees the trimmed view.
+        # Build latest.report.yml = 3 card docs (no eget) + 1 release
+        # doc, with the release JSON converted to YAML. url* keys in
+        # the release section are stripped first to keep the file
+        # compact.
         if [ -s /tmp/release/latest.release.raw.json ]; then
             # Strip every key whose name contains 'url' (case-insens).
             # Uses Python because yq's recursive delete is too eager.
@@ -239,12 +235,26 @@ runs:
                 < /tmp/release/latest.release.raw.json \
                 | tee /tmp/release.stripped.json > /dev/null
             {
-                cat "$out_card"
+                # First 3 docs: card data only — eget is excluded
+                # (it's diagnostic noise for downstream consumers).
+                cat /tmp/card.yml
+                printf -- '---\n'
+                cat /tmp/loc.yml
+                printf -- '---\n'
+                cat /tmp/scorecard.yml
+                # 4th doc: release JSON → YAML
                 printf -- '---\n'
                 yq -P '.' /tmp/release.stripped.json
             } | tee data/latest.report.yml > /dev/null
         else
-            cp "$out_card" data/latest.report.yml
+            # No release available — just emit the 3 card docs
+            {
+                cat /tmp/card.yml
+                printf -- '---\n'
+                cat /tmp/loc.yml
+                printf -- '---\n'
+                cat /tmp/scorecard.yml
+            } | tee data/latest.report.yml > /dev/null
         fi
 
         echo "card-data-path=$out_card" >> "$GITHUB_OUTPUT"
