@@ -299,10 +299,7 @@ runs:
             git config user.name  "x-cmd-install-bot"
             git config user.email "bot@x-cmd.com"
             git add data/
-            git commit -m "chore: migrate legacy data/<YYMMDD>.yml to data/history/
-
-  One-shot migration run by x-cmd-install-action. After every mirror
-  has executed this step once, it can be dropped from the action."
+            git commit -m "chore: migrate legacy data/<YYMMDD>.yml to data/history/ (one-shot)"
             git push
         fi
 
@@ -310,61 +307,24 @@ runs:
     # commit it alongside data/. The README is generated from scratch
     # each run — its content is fully derived from the card snapshot,
     # so there's no risk of stale prose.
+    #
+    # Why the template lives in scripts/generate_readme.py rather than
+    # a bash heredoc here: GitHub Actions' simplified YAML parser
+    # refuses to accept any line containing ': ' inside a literal-block
+    # scalar (the markdown is full of those). Moving the template out
+    # of action.yml avoids the parser quirk entirely.
     - name: Generate README.md
       shell: bash
+      env:
+        OWNER_REPO: ${{ steps.fskv.outputs.owner-repo }}
       run: |
         set -eo pipefail
         d=$(date -u +%y%m%d)
 
-        # /tmp/card.yml is a single YAML doc from `x repo card --yml`.
-        # We extract a few well-known fields with yq and emit a small
-        # markdown document. The exact upstream name comes from
-        # .x-cmd/fskv/ownerrepo (already in $OWNER_REPO via env).
         # shellcheck disable=SC1091
         . "$HOME/.x-cmd.root/X"
-
-        # Pull the bare repo name (no owner prefix) for display + URLs.
-        name="${OWNER_REPO##*/}"
-        upstream="${OWNER_REPO}"
-
-        # Card fields (defaults if missing).
-        desc=$(yq -r '.about.description // "n/a"' /tmp/card.yml)
-        homepage=$(yq -r '.about.homepage // ""' /tmp/card.yml)
-        latest=$(yq -r '.about.latestVersion // "n/a"' /tmp/card.yml)
-        license=$(yq -r '.about.license // "n/a"' /tmp/card.yml)
-        stars=$(yq -r '.popularity.star // 0' /tmp/card.yml)
-        forks=$(yq -r '.popularity.fork // 0' /tmp/card.yml)
-        open_issues=$(yq -r '.popularity.issue // 0' /tmp/card.yml)
-        contributors=$(yq -r '.popularity.contributor // 0' /tmp/card.yml)
-        last_commit=$(yq -r '.timeline.lastCommit // "n/a"' /tmp/card.yml)
-        last_release=$(yq -r '.timeline.lastRelease // "n/a"' /tmp/card.yml)
-
-        cat > README.md <<MD
-# ${name}
-
-${desc}
-
-- **Upstream**: <https://github.com/${upstream}>
-- **Homepage**: <${homepage}>
-- **Latest release**: \`${latest}\` (${last_release})
-- **Last commit**: ${last_commit}
-- **License**: ${license}
-- **Stars**: ${stars} · **Forks**: ${forks} · **Open issues**: ${open_issues} · **Contributors**: ${contributors}
-
-## Installation
-
-\`\`\`sh
-x install ${name}
-\`\`\`
-
-See <https://x-cmd.com/install/${name}> for details.
-
-## Data
-
-This mirror is auto-maintained by [x-cmd-install-action](https://github.com/x-cmd-install/x-cmd-install-action). Latest card snapshot: \`data/card/${d}.yml\`. Merged card+release view: \`data/latest.report.yml\`.
-
-_Last regenerated: $(date -u +%Y-%m-%dT%H:%M:%SZ)._
-MD
+        python3 "$GITHUB_ACTION_PATH/scripts/generate_readme.py" \
+            /tmp/card.yml "$OWNER_REPO" "$d" > README.md
 
         if git status --porcelain -- README.md | grep -q .; then
             git config user.name  "x-cmd-install-bot"
