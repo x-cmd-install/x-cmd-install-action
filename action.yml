@@ -224,7 +224,7 @@ runs:
             # falls back to JSON for the GitHub release payload).
             python3 "$GITHUB_ACTION_PATH/scripts/strip_url_keys.py" \
                 < /tmp/release/latest.release.raw.json \
-                | tee /tmp/release.stripped.yaml > /dev/null
+                | tee /tmp/release.stripped.json > /dev/null
             {
                 # First 3 docs: card data only — eget is excluded
                 # (it's diagnostic noise for downstream consumers).
@@ -235,7 +235,7 @@ runs:
                 cat /tmp/scorecard.yml
                 # 4th doc: release (already YAML after the script)
                 printf -- '---\n'
-                cat /tmp/release.stripped.yaml
+                cat /tmp/release.stripped.json
             } | tee data/latest.report.yml > /dev/null
         else
             # No release available — just emit the 3 card docs
