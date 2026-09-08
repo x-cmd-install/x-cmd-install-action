@@ -261,6 +261,109 @@ runs:
             echo "no data changes to commit"
         fi
 
+    # One-shot migration: any pre-v0.5 flat data/<YYMMDD>.yml gets moved
+    # to data/history/<YYMMDD>.yml. A sentinel file marks completion so
+    # subsequent runs skip this work. Drop this step after all mirrors
+    # have run it once.
+    - name: Migrate flat data/<date>.yml to data/history/
+      if: "! hashFiles('data/history/.migrated')"
+      shell: bash
+      run: |
+        set -eo pipefail
+        mkdir -p data/history
+        moved=0
+        # Match the legacy flat-path pattern: data/<6-digit YYMMDD>.yml.
+        # Latest snapshot under data/card/ is unaffected (that's the
+        # canonical path going forward).
+        for f in data/[0-9][0-9][0-9][0-9][0-9][0-9].yml; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f")
+            git mv "$f" "data/history/$base" 2>/dev/null || mv "$f" "data/history/$base"
+            moved=$((moved+1))
+        done
+        echo "migrated=$moved flat files to data/history/"
+        touch data/history/.migrated
+        if [ "$moved" -gt 0 ]; then
+            git config user.name  "x-cmd-install-bot"
+            git config user.email "bot@x-cmd.com"
+            git add data/
+            git commit -m "chore: migrate legacy data/<YYMMDD>.yml to data/history/
+
+  One-shot migration run by x-cmd-install-action. After every mirror
+  has executed this step once, it can be dropped from the action."
+            git push
+        fi
+
+    # Render a compact per-mirror README.md from today's card data and
+    # commit it alongside data/. The README is generated from scratch
+    # each run — its content is fully derived from the card snapshot,
+    # so there's no risk of stale prose.
+    - name: Generate README.md
+      shell: bash
+      run: |
+        set -eo pipefail
+        d=$(date -u +%y%m%d)
+
+        # /tmp/card.yml is a single YAML doc from `x repo card --yml`.
+        # We extract a few well-known fields with yq and emit a small
+        # markdown document. The exact upstream name comes from
+        # .x-cmd/fskv/ownerrepo (already in $OWNER_REPO via env).
+        # shellcheck disable=SC1091
+        . "$HOME/.x-cmd.root/X"
+
+        # Pull the bare repo name (no owner prefix) for display + URLs.
+        name="${OWNER_REPO##*/}"
+        upstream="${OWNER_REPO}"
+
+        # Card fields (defaults if missing).
+        desc=$(yq -r '.about.description // "n/a"' /tmp/card.yml)
+        homepage=$(yq -r '.about.homepage // ""' /tmp/card.yml)
+        latest=$(yq -r '.about.latestVersion // "n/a"' /tmp/card.yml)
+        license=$(yq -r '.about.license // "n/a"' /tmp/card.yml)
+        stars=$(yq -r '.popularity.star // 0' /tmp/card.yml)
+        forks=$(yq -r '.popularity.fork // 0' /tmp/card.yml)
+        open_issues=$(yq -r '.popularity.issue // 0' /tmp/card.yml)
+        contributors=$(yq -r '.popularity.contributor // 0' /tmp/card.yml)
+        last_commit=$(yq -r '.timeline.lastCommit // "n/a"' /tmp/card.yml)
+        last_release=$(yq -r '.timeline.lastRelease // "n/a"' /tmp/card.yml)
+
+        cat > README.md <<MD
+# ${name}
+
+${desc}
+
+- **Upstream**: <https://github.com/${upstream}>
+- **Homepage**: <${homepage}>
+- **Latest release**: \`${latest}\` (${last_release})
+- **Last commit**: ${last_commit}
+- **License**: ${license}
+- **Stars**: ${stars} · **Forks**: ${forks} · **Open issues**: ${open_issues} · **Contributors**: ${contributors}
+
+## Installation
+
+\`\`\`sh
+x install ${name}
+\`\`\`
+
+See <https://x-cmd.com/install/${name}> for details.
+
+## Data
+
+This mirror is auto-maintained by [x-cmd-install-action](https://github.com/x-cmd-install/x-cmd-install-action). Latest card snapshot: \`data/card/${d}.yml\`. Merged card+release view: \`data/latest.report.yml\`.
+
+_Last regenerated: $(date -u +%Y-%m-%dT%H:%M:%SZ)._
+MD
+
+        if git status --porcelain -- README.md | grep -q .; then
+            git config user.name  "x-cmd-install-bot"
+            git config user.email "bot@x-cmd.com"
+            git add README.md
+            git commit -m "docs: regenerate README.md from card snapshot ${d}"
+            git push
+        else
+            echo "no README.md changes to commit"
+        fi
+
 branding:
   icon: 'database'
   color: 'blue'
