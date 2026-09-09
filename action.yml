@@ -312,7 +312,8 @@ runs:
         # shellcheck disable=SC1091
         . "$HOME/.x-cmd.root/X"
         python3 "$GITHUB_ACTION_PATH/scripts/generate_readme.py" \
-            /tmp/card.yml "$OWNER_REPO" "$d" > README.md
+            /tmp/card.yml /tmp/loc.yml /tmp/scorecard.yml \
+            "$OWNER_REPO" "$d" > README.md
 
         if git status --porcelain -- README.md | grep -q .; then
             git config user.name  "x-cmd-install-bot"
