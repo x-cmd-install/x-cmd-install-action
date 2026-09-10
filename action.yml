@@ -184,6 +184,54 @@ runs:
             : > "$out_rel"
         fi
 
+    # Repology aggregates package versions across 250+ distros
+    # (Debian, Ubuntu, Arch, Homebrew, Nix, FreeBSD, ...). We mirror
+    # the project's status JSON to data/repology/ so it ships with
+    # the repo and downstream consumers can read it from
+    # raw.githubusercontent.com like any other card file. Both raw
+    # (JSON) and normalized (YAML) forms are written — the YAML form
+    # makes the data line-diffable in PRs.
+    - name: Fetch repology project data
+      id: repology
+      continue-on-error: true
+      shell: bash
+      env:
+        OWNER_REPO: ${{ steps.fskv.outputs.owner-repo }}
+      run: |
+        set -eo pipefail
+        mkdir -p /tmp/repology
+        out_raw="/tmp/repology/latest.repology.raw.json"
+        out_yml="/tmp/repology/latest.repology.yml"
+        name="${OWNER_REPO##*/}"
+        # Repology returns 403 to clients without a User-Agent.
+        http=$(curl -sSL --max-time 15 \
+              -H "User-Agent: Mozilla/5.0" \
+              -o "$out_raw" \
+              -w '%{http_code}' \
+              "https://repology.org/api/v1/project/${name}")
+        if [ "$http" = "200" ] && [ -s "$out_raw" ]; then
+            # Validate it's actually JSON, then convert to YAML.
+            if python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$out_raw" 2>/dev/null; then
+                # JSON ⊂ YAML 1.1 — we can dump the same JSON as YAML
+                # without losing structure. yq is the standard tool for
+                # this on the runner (no PyYAML needed).
+                if yq -P -o=yaml '.' "$out_raw" > "$out_yml" 2>/dev/null; then
+                    echo "repology-bytes=$(wc -c < "$out_raw")" >> "$GITHUB_OUTPUT"
+                else
+                    echo "repology: yq conversion failed; keeping raw JSON only" >&2
+                    : > "$out_yml"
+                fi
+            else
+                echo "repology: not valid JSON (http=$http); skipping" >&2
+                : > "$out_raw"
+                : > "$out_yml"
+            fi
+        else
+            echo "repology fetch failed (http=$http, project=$name); skipping" >&2
+            : > "$out_raw"
+            : > "$out_yml"
+        fi
+
     - name: Concatenate and commit
       shell: bash
       env:
@@ -208,7 +256,7 @@ runs:
         # two, and downstream consumers get a single file with both
         # card and release fields side by side.
 
-        mkdir -p data/card data/release
+        mkdir -p data/card data/release data/repology
 
         out_card="data/card/${d}.yml"
         {
@@ -222,6 +270,8 @@ runs:
         } > "$out_card"
 
         cp /tmp/release/latest.release.raw.json data/release/latest.release.raw.json 2>/dev/null || true
+        cp /tmp/repology/latest.repology.raw.json data/repology/latest.repology.raw.json 2>/dev/null || true
+        cp /tmp/repology/latest.repology.yml    data/repology/latest.repology.yml    2>/dev/null || true
 
         # Build latest.report.yml = 3 card docs (no eget) + 1 release
         # doc, with the release JSON converted to YAML. url* keys in
