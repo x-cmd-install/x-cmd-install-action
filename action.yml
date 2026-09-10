@@ -169,8 +169,18 @@ runs:
               > "$out_rel" 2> /tmp/release.err; then
             echo "release-bytes=$(wc -c < "$out_rel")" >> "$GITHUB_OUTPUT"
         else
-            echo "release fetch failed (rc=$?); keeping empty file" >&2
-            cat /tmp/release.err >&2
+            rc=$?
+            # Echo release.err line-by-line so it lands in the step log,
+            # not just on stderr where GitHub collapses it. Useful when
+            # debugging why a fetch silently failed.
+            echo "release fetch failed (rc=$rc)" >&2
+            if [ -s /tmp/release.err ]; then
+                while IFS= read -r line; do
+                    echo "  release.err: $line" >&2
+                done < /tmp/release.err
+            else
+                echo "  release.err is empty" >&2
+            fi
             : > "$out_rel"
         fi
 
