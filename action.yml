@@ -214,9 +214,12 @@ runs:
         out_raw="/tmp/repology/latest.repology.raw.json"
         out_yml="/tmp/repology/latest.repology.yml"
         name="$REPOL_NAME"
-        # Repology returns 403 to clients without a User-Agent.
+        # Repology returns 403 unless we send a full browser-shaped
+        # UA + Referer — User-Agent alone is not enough any more.
         http=$(curl -sSL --max-time 15 \
-              -H "User-Agent: Mozilla/5.0" \
+              -H "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36" \
+              -H "Accept: application/json, text/plain, */*" \
+              -H "Referer: https://repology.org/" \
               -o "$out_raw" \
               -w '%{http_code}' \
               "https://repology.org/api/v1/project/${name}")
