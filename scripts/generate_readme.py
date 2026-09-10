@@ -1,33 +1,39 @@
 #!/usr/bin/env python3
-"""generate_readme.py — write README.md from card / loc / scorecard YAML.
+"""generate_readme.py — write README.md (English) and README.cn.md (Chinese)
+from card / loc / scorecard YAML.
 
 Usage:
     generate_readme.py <card.yml> <loc.yml> <scorecard.yml> \\
-                      <owner_repo> <date_stamp> > README.md
+                      <owner_repo> <date_stamp>
 
-Why this is a Python script rather than a bash heredoc:
+Outputs two files in the current directory:
+  README.md     — English version (primary, GitHub displays this by default)
+  README.cn.md  — Chinese version (linked from README.md)
+
+Why a Python script (not a bash heredoc):
   The action's YAML manifest uses a literal-block scalar for the run
   step (`run: |`). GitHub Actions' simplified YAML parser refuses to
-  accept any line that contains ': ' (colon-space) inside such a
-  block — README markdown is full of those. Moving the README template
-  out of the action.yml and into a standalone script sidesteps that
-  parser quirk entirely.
+  accept any line containing ': ' inside such a block — markdown is
+  full of those. Moving the template to a standalone script sidesteps
+  the parser quirk entirely.
 
 Layout strategy:
   Front-load everything SEO-relevant on the first screen:
     1. Title + description (the actual content of the software)
-    2. Upstream + homepage links
-    3. Install command
-    4. Metadata block (license, release, popularity)
+    2. Logo SVG (every mirror gets https://repo.x-cmd.io/<name>.svg)
+    3. Upstream + homepage links
+    4. Install command
+    5. Metadata block (license, release, popularity)
   Then the data block:
-    5. LOC summary (top 5 languages by code size + grand total)
-    6. OpenSSF scorecard score (single number) and top failing checks
-  Skip anything that's pure plumbing — no "auto-maintained by" boilerplate.
+    6. Code size — top 5 languages with code/comments/blanks/files
+    7. OpenSSF scorecard score and 3 lowest individual checks
+  Skip plumbing — no "auto-maintained by" boilerplate that dilutes
+  the page's keywords without adding anything for the visitor.
 
 Note on yq usage:
   mikefarah/yq v4 in some setups refuses pipe syntax in expression
-  args ('| expects 2 args'). We avoid multi-step pipelines and do one
-  yq call per field. Slightly slower but rock-solid.
+  args ('Error: | expects 2 args'). We avoid multi-step pipelines and
+  do one yq call per field. Slightly slower but rock-solid.
 """
 import datetime
 import subprocess
@@ -58,11 +64,10 @@ def fmt_int(n):
 
 def loc_summary(loc_file):
     """Return (total_code, top_langs) where top_langs is up to 5 entries
-    of (language, code_lines, file_count) sorted by code desc.
+    of (language, code, comments, blanks, files) sorted by code desc.
     """
     if not loc_file:
         return 0, []
-    # Get the list of language keys first, then read each individually.
     keys = yq('.loc | keys | .[]', loc_file)
     if not keys:
         return 0, []
@@ -71,11 +76,13 @@ def loc_summary(loc_file):
         if not lang:
             continue
         try:
-            code = int(yq(f'.loc["{lang}"].code // 0', loc_file) or 0)
-            files = int(yq(f'.loc["{lang}"].files // 0', loc_file) or 0)
+            code     = int(yq(f'.loc["{lang}"].code // 0',     loc_file) or 0)
+            comments = int(yq(f'.loc["{lang}"].comments // 0', loc_file) or 0)
+            blanks   = int(yq(f'.loc["{lang}"].blanks // 0',   loc_file) or 0)
+            files    = int(yq(f'.loc["{lang}"].files // 0',    loc_file) or 0)
         except ValueError:
             continue
-        rows.append((lang, code, files))
+        rows.append((lang, code, comments, blanks, files))
     rows.sort(key=lambda r: -r[1])
     return sum(r[1] for r in rows), rows[:5]
 
@@ -88,9 +95,6 @@ def scorecard_summary(scorecard_file):
     if not score:
         return None, []
 
-    # We can't use a yq pipe expression to enumerate checks safely, so
-    # read the count first, then index in. This caps at 30 checks
-    # (more than enough — scorecard has ~18 in practice).
     count_raw = yq('.checks // [] | length', scorecard_file)
     try:
         n = int(count_raw)
@@ -112,22 +116,81 @@ def scorecard_summary(scorecard_file):
     return score, lows
 
 
-def main():
-    card, loc, scorecard = sys.argv[1], sys.argv[2], sys.argv[3]
-    owner_repo, d = sys.argv[4], sys.argv[5]
-    name = owner_repo.split("/", 1)[-1]
+# ---------- i18n strings ----------
 
-    desc          = yq('.about.description // ""',           card)
-    homepage      = yq('.about.homepage // ""',              card)
-    latest        = yq('.about.latestVersion // ""',         card)
-    license_      = yq('.about.license // ""',               card)
-    stars         = fmt_int(yq('.popularity.star // 0',       card))
-    forks         = fmt_int(yq('.popularity.fork // 0',       card))
-    open_issues   = fmt_int(yq('.popularity.issue // 0',      card))
+T = {
+    "en": {
+        "lang_link":   "中文版本",
+        "archived":    "> ⚠️ This project is archived.",
+        "install_h":   "## Install",
+        "install_cmd": "x install {name}",
+        "source_h":    "## Source",
+        "upstream":    "- **Upstream**: <https://github.com/{owner_repo}>",
+        "homepage":    "- **Homepage**: <{homepage}>",
+        "license":     "- **License**: {license}",
+        "release_h":   "## Release",
+        "latest":      "- **Latest**: `{latest}`",
+        "latest_with_date": "- **Latest**: `{latest}` ({last_release})",
+        "last_commit": "- **Last commit**: {last_commit}",
+        "popularity_h": "## Popularity",
+        "popularity":  "- **Stars**: {stars} · **Forks**: {forks} · **Open issues**: {open_issues} · **Contributors**: {contributors}",
+        "code_h":      "## Code size",
+        "code_total":  "Total: **{total_loc:,}** lines of code across **{total_files}** files in the top 5 languages.",
+        "code_hdr":    "| Language | Code | Comments | Blanks | Files |",
+        "code_sep":    "|----------|-----:|---------:|-------:|------:|",
+        "code_row":    "| {lang} | {code:,} | {comments:,} | {blanks:,} | {files} |",
+        "sc_h":        "## OpenSSF Scorecard",
+        "sc_total":    "Overall score: **{score} / 10**",
+        "sc_low_h":    "Lowest-scoring checks:",
+        "sc_low_row":  "- **{name}** ({score}/10) — {reason}",
+        "footer":      "_Snapshot: `data/card/{d}.yml` · {now}._",
+        "logo":        "![{name}](https://repo.x-cmd.io/{name}.svg)",
+    },
+    "cn": {
+        "lang_link":   "English version",
+        "archived":    "> ⚠️ 此项目已归档（archived）。",
+        "install_h":   "## 安装",
+        "install_cmd": "x install {name}",
+        "source_h":    "## 源代码",
+        "upstream":    "- **上游仓库**: <https://github.com/{owner_repo}>",
+        "homepage":    "- **官网**: <{homepage}>",
+        "license":     "- **许可证**: {license}",
+        "release_h":   "## 发布",
+        "latest":      "- **最新版本**: `{latest}`",
+        "latest_with_date": "- **最新版本**: `{latest}` ({last_release})",
+        "last_commit": "- **最近提交**: {last_commit}",
+        "popularity_h": "## 流行度",
+        "popularity":  "- **Star**: {stars} · **Fork**: {forks} · **开放 issue**: {open_issues} · **贡献者**: {contributors}",
+        "code_h":      "## 代码规模",
+        "code_total":  "合计: **{total_loc:,}** 行代码（覆盖前 5 种语言、共 **{total_files}** 个文件）。",
+        "code_hdr":    "| 语言 | 代码 | 注释 | 空行 | 文件数 |",
+        "code_sep":    "|------|-----:|-----:|-----:|------:|",
+        "code_row":    "| {lang} | {code:,} | {comments:,} | {blanks:,} | {files} |",
+        "sc_h":        "## OpenSSF Scorecard 评分",
+        "sc_total":    "总评分: **{score} / 10**",
+        "sc_low_h":    "评分最低的几项:",
+        "sc_low_row":  "- **{name}** ({score}/10) — {reason}",
+        "footer":      "_数据快照: `data/card/{d}.yml` · {now}._",
+        "logo":        "![{name}](https://repo.x-cmd.io/{name}.svg)",
+    },
+}
+
+
+def build_readme(lang, name, owner_repo, d, card, loc, scorecard):
+    """Return the rendered README content for one language."""
+    t = T[lang]
+
+    desc          = yq('.about.description // ""', card)
+    homepage      = yq('.about.homepage // ""', card)
+    latest        = yq('.about.latestVersion // ""', card)
+    license_      = yq('.about.license // ""', card)
+    stars         = fmt_int(yq('.popularity.star // 0', card))
+    forks         = fmt_int(yq('.popularity.fork // 0', card))
+    open_issues   = fmt_int(yq('.popularity.issue // 0', card))
     contributors  = fmt_int(yq('.popularity.contributor // 0', card))
-    last_commit   = yq('.timeline.lastCommit // ""',          card)
-    last_release  = yq('.timeline.lastRelease // ""',        card)
-    archived      = yq('.about.archived // false',           card).lower() == "true"
+    last_commit   = yq('.timeline.lastCommit // ""', card)
+    last_release  = yq('.timeline.lastRelease // ""', card)
+    archived      = yq('.about.archived // false', card).lower() == "true"
 
     total_loc, top_langs = loc_summary(loc)
     score, low_checks = scorecard_summary(scorecard)
@@ -138,92 +201,113 @@ def main():
     lines.append(f"# {name}")
     lines.append("")
 
+    # Cross-language link at the very top so a Chinese reader can
+    # immediately jump to README.cn.md (and vice versa).
+    if lang == "en":
+        lines.append(f"[{T['cn']['lang_link']}](./README.cn.md)")
+    else:
+        lines.append(f"[{T['en']['lang_link']}](./README.md)")
+    lines.append("")
+
     if archived:
-        lines.append("> ⚠️ This project is archived.")
+        lines.append(t["archived"])
         lines.append("")
 
     if desc:
         lines.append(desc)
         lines.append("")
 
-    # Logo SVG — every mirror gets one. The repo.x-cmd.io host serves
-    # the SVG at a deterministic path keyed by the bare repo name
-    # (e.g. /jq.svg for the jqlang/jq mirror), so we can hardcode the
-    # URL pattern here and not have to plumb anything through from the
-    # action. If the asset is missing on the host, GitHub just renders
-    # a broken-image icon — that's fine, the rest of the README still
-    # renders normally.
-    lines.append(f"![{name}](https://repo.x-cmd.io/{name}.svg)")
+    lines.append(t["logo"].format(name=name))
     lines.append("")
 
     # Install block — first thing the visitor wants to know
-    lines.append("## Install")
+    lines.append(t["install_h"])
     lines.append("")
     lines.append("```sh")
-    lines.append(f"x install {name}")
+    lines.append(t["install_cmd"].format(name=name))
     lines.append("```")
     lines.append("")
 
     # Source block
-    lines.append("## Source")
+    lines.append(t["source_h"])
     lines.append("")
-    lines.append(f"- **Upstream**: <https://github.com/{owner_repo}>")
+    lines.append(t["upstream"].format(owner_repo=owner_repo))
     if homepage:
-        lines.append(f"- **Homepage**: <{homepage}>")
+        lines.append(t["homepage"].format(homepage=homepage))
     if license_:
-        lines.append(f"- **License**: {license_}")
+        lines.append(t["license"].format(license=license_))
     lines.append("")
 
     # Release block — only if we have one
     if latest or last_release:
-        lines.append("## Release")
+        lines.append(t["release_h"])
         lines.append("")
         if latest:
-            rline = f"- **Latest**: `{latest}`"
             if last_release:
-                rline += f" ({last_release})"
-            lines.append(rline)
+                lines.append(t["latest_with_date"].format(latest=latest, last_release=last_release))
+            else:
+                lines.append(t["latest"].format(latest=latest))
         if last_commit:
-            lines.append(f"- **Last commit**: {last_commit}")
+            lines.append(t["last_commit"].format(last_commit=last_commit))
         lines.append("")
 
     # Popularity block
-    lines.append("## Popularity")
+    lines.append(t["popularity_h"])
     lines.append("")
-    lines.append(f"- **Stars**: {stars} · **Forks**: {forks} · **Open issues**: {open_issues} · **Contributors**: {contributors}")
+    lines.append(t["popularity"].format(
+        stars=stars, forks=forks, open_issues=open_issues, contributors=contributors,
+    ))
     lines.append("")
 
     # LOC block — only if we have data
     if total_loc > 0:
-        lines.append("## Code size")
+        lines.append(t["code_h"])
         lines.append("")
-        total_files = sum(t[2] for t in top_langs)
-        lines.append(f"Total: **{total_loc:,}** lines of code across {total_files} of the top files.")
+        total_files = sum(t_[4] for t_ in top_langs)
+        lines.append(t["code_total"].format(total_loc=total_loc, total_files=total_files))
         lines.append("")
-        lines.append("| Language | Code | Files |")
-        lines.append("|----------|-----:|------:|")
-        for lang, code, files in top_langs:
-            lines.append(f"| {lang} | {code:,} | {files} |")
+        lines.append(t["code_hdr"])
+        lines.append(t["code_sep"])
+        for lang_, code, comments, blanks, files in top_langs:
+            lines.append(t["code_row"].format(
+                lang=lang_, code=code, comments=comments, blanks=blanks, files=files,
+            ))
         lines.append("")
 
     # OpenSSF scorecard block — only if we have a score
     if score:
-        lines.append("## OpenSSF Scorecard")
+        lines.append(t["sc_h"])
         lines.append("")
-        lines.append(f"Overall score: **{score} / 10**")
+        lines.append(t["sc_total"].format(score=score))
         lines.append("")
         if low_checks:
-            lines.append("Lowest-scoring checks:")
+            lines.append(t["sc_low_h"])
             lines.append("")
             for name_, s, reason in low_checks:
                 r = (reason[:120] + "…") if len(reason) > 120 else reason
-                lines.append(f"- **{name_}** ({s}/10) — {r}")
+                lines.append(t["sc_low_row"].format(name=name_, score=s, reason=r))
             lines.append("")
 
-    # Footnote — small, plain, no SEO-damaging boilerplate
-    lines.append(f"_Snapshot: `data/card/{d}.yml` · {now}._")
+    lines.append(t["footer"].format(d=d, now=now))
+    return "\n".join(lines) + "\n"
 
-    sys.stdout.write("\n".join(lines) + "\n")
+
+def main():
+    if len(sys.argv) != 6:
+        print(f"usage: {sys.argv[0]} <card.yml> <loc.yml> <scorecard.yml> <owner_repo> <date_stamp>",
+              file=sys.stderr)
+        sys.exit(2)
+    card, loc, scorecard = sys.argv[1], sys.argv[2], sys.argv[3]
+    owner_repo, d = sys.argv[4], sys.argv[5]
+    name = owner_repo.split("/", 1)[-1]
+
+    en = build_readme("en", name, owner_repo, d, card, loc, scorecard)
+    cn = build_readme("cn", name, owner_repo, d, card, loc, scorecard)
+
+    with open("README.md", "w") as f:
+        f.write(en)
+    with open("README.cn.md", "w") as f:
+        f.write(cn)
 
 
 if __name__ == "__main__":

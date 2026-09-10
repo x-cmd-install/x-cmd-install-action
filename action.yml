@@ -311,18 +311,21 @@ runs:
 
         # shellcheck disable=SC1091
         . "$HOME/.x-cmd.root/X"
+        # The script writes both README.md (English) and README.cn.md
+        # (Chinese) into the current working directory. Cross-language
+        # links at the top of each file point at the other.
         python3 "$GITHUB_ACTION_PATH/scripts/generate_readme.py" \
             /tmp/card.yml /tmp/loc.yml /tmp/scorecard.yml \
-            "$OWNER_REPO" "$d" > README.md
+            "$OWNER_REPO" "$d"
 
-        if git status --porcelain -- README.md | grep -q .; then
+        if git status --porcelain -- README.md README.cn.md | grep -q .; then
             git config user.name  "x-cmd-install-bot"
             git config user.email "bot@x-cmd.com"
-            git add README.md
-            git commit -m "docs: regenerate README.md from card snapshot ${d}"
+            git add README.md README.cn.md
+            git commit -m "docs: regenerate README.md + README.cn.md from card snapshot ${d}"
             git push
         else
-            echo "no README.md changes to commit"
+            echo "no README changes to commit"
         fi
 
 branding:
