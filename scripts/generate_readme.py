@@ -580,7 +580,6 @@ def build_readme(lang, name, owner_repo, d, card, loc, scorecard, classify_tsv, 
                 opr=opr, ci=ci, oi=oi, cmt=cmt,
             ))
         lines.append("")
-            lines.append("")
 
     # Release assets table — only if x eget classify produced rows.
     # Each row: name is a hyperlink to the GitHub release download URL,
