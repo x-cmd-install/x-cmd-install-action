@@ -39,6 +39,8 @@ import datetime
 import subprocess
 import sys
 
+import yaml
+
 
 def yq(expr, file, default=""):
     """yq expression → string. Returns default on empty/null/error."""
@@ -217,6 +219,97 @@ def fmt_bytes(n):
     return f"{n:.1f} PiB"
 
 
+def repology_summary(repology_yml):
+    """Read the repology YAML and return a dict with totals + a list of
+    popular-distro rows for the README table.
+
+    Returns None if the file is missing or empty (mirror hasn't opted
+    in to repology data).
+
+    Output shape:
+        {
+          "total": int,    # repos reporting this project
+          "latest": int,   # repos on the newest upstream version
+          "outdated": int, # repos on an older version
+          "popular": [(repo, version, status_label), ...]
+        }
+
+    "popular" picks the most user-relevant distros: Debian unstable,
+    Debian stable (latest release), Ubuntu LTS, Ubuntu latest, Arch,
+    Homebrew, Fedora rawhide. We show what version each ships, so the
+    visitor knows what they'll actually get when they install via the
+    distro's package manager.
+    """
+    import os
+    if not repology_yml or not os.path.isfile(repology_yml):
+        return None
+
+    try:
+        with open(repology_yml) as f:
+            entries = yaml.safe_load(f)
+    except Exception:
+        return None
+    if not isinstance(entries, list) or not entries:
+        return None
+
+    # Latest version seen in the upstream entries. Repology marks an
+    # entry as 'newest' if it matches the upstream's newest stable
+    # version. Use that as our reference.
+    statuses = {}
+    latest_version = ""
+    for e in entries:
+        s = e.get("status", "unknown")
+        statuses[s] = statuses.get(s, 0) + 1
+        if s == "newest" and not latest_version:
+            latest_version = e.get("version", "")
+    if not latest_version:
+        return None
+
+    # Map repo names we care about → human-readable label. The repo
+    # names in repology are typically '<distro>_<version>' or just
+    # '<distro>'. We pick a small set that covers most users.
+    want = [
+        ("debian_unstable",      "Debian unstable"),
+        ("debian_14",            "Debian 14"),
+        ("debian_13",            "Debian 13"),
+        ("ubuntu_26_04",         "Ubuntu 26.04 LTS"),
+        ("ubuntu_24_04",         "Ubuntu 24.04 LTS"),
+        ("arch",                 "Arch"),
+        ("homebrew",             "Homebrew"),
+        ("fedora_rawhide",       "Fedora rawhide"),
+        ("nix_unstable",         "Nix unstable"),
+        ("void_x86_64",          "Void"),
+        ("alpine_edge",          "Alpine edge"),
+        ("opensuse_tumbleweed",  "openSUSE Tumbleweed"),
+    ]
+
+    # Build repo → (version, status) map (first match wins per repo)
+    by_repo = {}
+    for e in entries:
+        r = e.get("repo", "")
+        if r and r not in by_repo:
+            by_repo[r] = (e.get("version", ""), e.get("status", ""))
+
+    popular = []
+    for rkey, label in want:
+        if rkey in by_repo:
+            ver, status = by_repo[rkey]
+            status_label = {
+                "newest":   "✓ latest",
+                "outdated": "outdated",
+                "legacy":   "legacy",
+                "rolling":  "rolling",
+            }.get(status, status)
+            popular.append((label, ver, status_label))
+
+    return {
+        "total":    len(entries),
+        "latest":   statuses.get("newest", 0),
+        "outdated": statuses.get("outdated", 0),
+        "popular":  popular,
+    }
+
+
 
 # ---------- i18n strings ----------
 
@@ -257,6 +350,11 @@ T = {
         "sc_total":    "Overall score: **{score} / 10**",
         "sc_low_h":    "Lowest-scoring checks:",
         "sc_low_row":  "- **{name}** ({score}/10) — {reason}",
+        "dist_h":      "## Distribution status",
+        "dist_summary": "Reported by **{total}** distros on repology.org. **{latest}** are on the latest upstream release, **{outdated}** are on an older version.",
+        "dist_hdr":    "| Distro | Version | Status |",
+        "dist_sep":    "|--------|---------|--------|",
+        "dist_row":    "| {repo} | `{version}` | {status} |",
         "improve_h":   "## Improve this data",
         "improve_body": "Install metadata for {name} lives in the [x-cmd/install](https://github.com/x-cmd/install) index — a curated YAML package list that x-cmd consumes at install time. If `{name}` is missing, out of date, or installs incorrectly, please open an issue or PR there:\n\n- **Open an issue**: <https://github.com/x-cmd/install/issues/new>\n- **Edit the package entry**: <https://github.com/x-cmd/install/edit/main/{name}.yml> (or whichever path the index uses)\n\nThe data on this page (card / loc / scorecard / release) is auto-collected by [x-cmd-install-action](https://github.com/x-cmd-install/x-cmd-install-action) and is regenerated daily. Improvements to *install behaviour* (which version gets installed, platform-specific quirks, dependencies) belong upstream in the index.",
         "footer":      "_Snapshot: `data/card/{d}.yml` · {now}._",
@@ -298,6 +396,11 @@ T = {
         "sc_total":    "总评分: **{score} / 10**",
         "sc_low_h":    "评分最低的几项:",
         "sc_low_row":  "- **{name}** ({score}/10) — {reason}",
+        "dist_h":      "## 发行版状态",
+        "dist_summary": "在 repology.org 上共有 **{total}** 个发行版报告此项目。**{latest}** 个已是最新上游版本，**{outdated}** 个使用旧版本。",
+        "dist_hdr":    "| 发行版 | 版本 | 状态 |",
+        "dist_sep":    "|--------|------|------|",
+        "dist_row":    "| {repo} | `{version}` | {status} |",
         "improve_h":   "## 改进这些数据",
         "improve_body": "{name} 的安装元数据由 [x-cmd/install](https://github.com/x-cmd/install) 索引维护——这是一份由 x-cmd 在安装时读取的精选 YAML 包列表。如果 `{name}` 缺失、过期，或安装行为有问题，欢迎在该 repo 提 issue 或 PR：\n\n- **提交 issue**: <https://github.com/x-cmd/install/issues/new>\n- **编辑包条目**: <https://github.com/x-cmd/install/edit/main/{name}.yml>（或索引实际使用的路径）\n\n本页面的数据（card / loc / scorecard / release）由 [x-cmd-install-action](https://github.com/x-cmd-install/x-cmd-install-action) 自动采集，每日重新生成。**安装行为**（版本选择、平台差异、依赖处理）的改进应提交到上游索引。",
         "footer":      "_数据快照: `data/card/{d}.yml` · {now}._",
@@ -306,7 +409,7 @@ T = {
 }
 
 
-def build_readme(lang, name, owner_repo, d, card, loc, scorecard, classify_tsv):
+def build_readme(lang, name, owner_repo, d, card, loc, scorecard, classify_tsv, repology_yml):
     """Return the rendered README content for one language."""
     t = T[lang]
 
@@ -327,6 +430,7 @@ def build_readme(lang, name, owner_repo, d, card, loc, scorecard, classify_tsv):
     activity_rows = activity_summary(card)
     totals = totals_summary(card)
     asset_rows = classify_assets(classify_tsv)
+    repology_rows = repology_summary(repology_yml)
 
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -389,21 +493,6 @@ def build_readme(lang, name, owner_repo, d, card, loc, scorecard, classify_tsv):
             lines.append(t["assets"].format(n=len(asset_rows)))
         lines.append("")
 
-    # Release assets table — only if x eget classify produced rows.
-    # Each row: name is a hyperlink to the GitHub release download URL,
-    # size is human-readable (KiB/MiB/GiB), target is x-cmd's native
-    # platform identifier (e.g. native/darwin/arm64).
-    if asset_rows:
-        lines.append(t["assets_h"])
-        lines.append("")
-        lines.append(t["assets_hdr"])
-        lines.append(t["assets_sep"])
-        for aname, aurl, asize, atarget in asset_rows:
-            lines.append(t["assets_row"].format(
-                name=aname, url=aurl, size=fmt_bytes(asize), target=atarget,
-            ))
-        lines.append("")
-
     # Popularity block
     lines.append(t["popularity_h"])
     lines.append("")
@@ -463,6 +552,46 @@ def build_readme(lang, name, owner_repo, d, card, loc, scorecard, classify_tsv):
                 lines.append(t["sc_low_row"].format(name=name_, score=s, reason=r))
             lines.append("")
 
+    # Release assets table — only if x eget classify produced rows.
+    # Each row: name is a hyperlink to the GitHub release download URL,
+    # size is human-readable (KiB/MiB/GiB), target is x-cmd's native
+    # platform identifier (e.g. native/darwin/arm64).
+    if asset_rows:
+        lines.append(t["assets_h"])
+        lines.append("")
+        lines.append(t["assets_hdr"])
+        lines.append(t["assets_sep"])
+        for aname, aurl, asize, atarget in asset_rows:
+            lines.append(t["assets_row"].format(
+                name=aname, url=aurl, size=fmt_bytes(asize), target=atarget,
+            ))
+        lines.append("")
+
+    # Distribution status — repology aggregates package versions across
+    # 250+ distros (Debian, Ubuntu, Arch, Homebrew, Nix, FreeBSD).
+    # We render a compact summary: total repos reporting this project,
+    # how many are on the latest upstream version, and the most
+    # popular distros' current version. Pulled from
+    # data/repology/latest.repology.yml; only rendered when the mirror
+    # has opted in via .x-cmd/fskv/repology_name.
+    if repology_rows:
+        lines.append(t["dist_h"])
+        lines.append("")
+        lines.append(t["dist_summary"].format(
+            total=repology_rows["total"],
+            latest=repology_rows["latest"],
+            outdated=repology_rows["outdated"],
+        ))
+        lines.append("")
+        if repology_rows["popular"]:
+            lines.append(t["dist_hdr"])
+            lines.append(t["dist_sep"])
+            for repo, ver, status in repology_rows["popular"]:
+                lines.append(t["dist_row"].format(
+                    repo=repo, version=ver, status=status,
+                ))
+            lines.append("")
+
     # Improve section — always present, invites contribution
     lines.append(t["improve_h"])
     lines.append("")
@@ -474,16 +603,18 @@ def build_readme(lang, name, owner_repo, d, card, loc, scorecard, classify_tsv):
 
 
 def main():
-    if len(sys.argv) != 7:
-        print(f"usage: {sys.argv[0]} <card.yml> <loc.yml> <scorecard.yml> <classify.tsv> <owner_repo> <date_stamp>",
+    if len(sys.argv) != 8:
+        print(f"usage: {sys.argv[0]} <card.yml> <loc.yml> <scorecard.yml> <classify.tsv> <repology.yml> <owner_repo> <date_stamp>",
               file=sys.stderr)
         sys.exit(2)
-    card, loc, scorecard, classify_tsv = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-    owner_repo, d = sys.argv[5], sys.argv[6]
+    card, loc, scorecard, classify_tsv, repology_yml = (
+        sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+    )
+    owner_repo, d = sys.argv[6], sys.argv[7]
     name = owner_repo.split("/", 1)[-1]
 
-    en = build_readme("en", name, owner_repo, d, card, loc, scorecard, classify_tsv)
-    cn = build_readme("cn", name, owner_repo, d, card, loc, scorecard, classify_tsv)
+    en = build_readme("en", name, owner_repo, d, card, loc, scorecard, classify_tsv, repology_yml)
+    cn = build_readme("cn", name, owner_repo, d, card, loc, scorecard, classify_tsv, repology_yml)
 
     with open("README.md", "w") as f:
         f.write(en)
