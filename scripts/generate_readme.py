@@ -201,12 +201,15 @@ def build_readme(lang, name, owner_repo, d, card, loc, scorecard):
     lines.append(f"# {name}")
     lines.append("")
 
-    # Cross-language link at the very top so a Chinese reader can
-    # immediately jump to README.cn.md (and vice versa).
+    # Cross-language link at the very top so a reader can switch
+    # language without hunting for the right file. The link text is
+    # the *current* file's invitation to switch — "中文版本" on the
+    # English README invites the reader to go read the Chinese one,
+    # "English version" on the Chinese README invites them back.
     if lang == "en":
-        lines.append(f"[{T['cn']['lang_link']}](./README.cn.md)")
+        lines.append(f"[{T['en']['lang_link']}](./README.cn.md)")
     else:
-        lines.append(f"[{T['en']['lang_link']}](./README.md)")
+        lines.append(f"[{T['cn']['lang_link']}](./README.md)")
     lines.append("")
 
     if archived:
