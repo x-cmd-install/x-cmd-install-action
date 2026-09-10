@@ -28,10 +28,18 @@ runs:
         set -eo pipefail
         OWNER_REPO=$(cat .x-cmd/fskv/ownerrepo)
         SCORECARD_REPO=$(cat .x-cmd/fskv/scorecard_ownerrepo 2>/dev/null || echo "$OWNER_REPO")
+        # repology_name is the project key on repology.org. Most
+        # mirrors leave it unset and we fall back to the bare repo
+        # name (e.g. `jq` for `jqlang/jq`). Override only when the
+        # repology key differs from the repo name — e.g. python-pip
+        # → `pip`, golang → `go`.
+        REPOL_NAME=$(cat .x-cmd/fskv/repology_name 2>/dev/null || basename "$OWNER_REPO")
         echo "owner-repo=$OWNER_REPO"
         echo "scorecard=$SCORECARD_REPO"
+        echo "repology=$REPOL_NAME"
         echo "owner-repo=$OWNER_REPO" >> "$GITHUB_OUTPUT"
         echo "scorecard=$SCORECARD_REPO" >> "$GITHUB_OUTPUT"
+        echo "repology=$REPOL_NAME" >> "$GITHUB_OUTPUT"
 
     - name: Install x-cmd
       id: install
@@ -196,13 +204,13 @@ runs:
       continue-on-error: true
       shell: bash
       env:
-        OWNER_REPO: ${{ steps.fskv.outputs.owner-repo }}
+        REPOL_NAME: ${{ steps.fskv.outputs.repology }}
       run: |
         set -eo pipefail
         mkdir -p /tmp/repology
         out_raw="/tmp/repology/latest.repology.raw.json"
         out_yml="/tmp/repology/latest.repology.yml"
-        name="${OWNER_REPO##*/}"
+        name="$REPOL_NAME"
         # Repology returns 403 to clients without a User-Agent.
         http=$(curl -sSL --max-time 15 \
               -H "User-Agent: Mozilla/5.0" \
