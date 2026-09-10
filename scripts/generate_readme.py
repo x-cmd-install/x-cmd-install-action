@@ -301,7 +301,7 @@ T = {
         "improve_h":   "## 改进这些数据",
         "improve_body": "{name} 的安装元数据由 [x-cmd/install](https://github.com/x-cmd/install) 索引维护——这是一份由 x-cmd 在安装时读取的精选 YAML 包列表。如果 `{name}` 缺失、过期，或安装行为有问题，欢迎在该 repo 提 issue 或 PR：\n\n- **提交 issue**: <https://github.com/x-cmd/install/issues/new>\n- **编辑包条目**: <https://github.com/x-cmd/install/edit/main/{name}.yml>（或索引实际使用的路径）\n\n本页面的数据（card / loc / scorecard / release）由 [x-cmd-install-action](https://github.com/x-cmd-install/x-cmd-install-action) 自动采集，每日重新生成。**安装行为**（版本选择、平台差异、依赖处理）的改进应提交到上游索引。",
         "footer":      "_数据快照: `data/card/{d}.yml` · {now}._",
-        "logo":        "![{name}](https://repo.x-cmd.io/{name}.svg)",
+        "logo":        "![{name}](https://repo.x-cmd.io/{name}.svg?lang=zh)",
     },
 }
 
