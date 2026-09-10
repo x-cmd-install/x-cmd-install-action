@@ -146,6 +146,16 @@ def main():
         lines.append(desc)
         lines.append("")
 
+    # Logo SVG — every mirror gets one. The repo.x-cmd.io host serves
+    # the SVG at a deterministic path keyed by the bare repo name
+    # (e.g. /jq.svg for the jqlang/jq mirror), so we can hardcode the
+    # URL pattern here and not have to plumb anything through from the
+    # action. If the asset is missing on the host, GitHub just renders
+    # a broken-image icon — that's fine, the rest of the README still
+    # renders normally.
+    lines.append(f"![{name}](https://repo.x-cmd.io/{name}.svg)")
+    lines.append("")
+
     # Install block — first thing the visitor wants to know
     lines.append("## Install")
     lines.append("")
