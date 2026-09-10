@@ -28,18 +28,20 @@ runs:
         set -eo pipefail
         OWNER_REPO=$(cat .x-cmd/fskv/ownerrepo)
         SCORECARD_REPO=$(cat .x-cmd/fskv/scorecard_ownerrepo 2>/dev/null || echo "$OWNER_REPO")
-        # repology_name is the project key on repology.org. Most
-        # mirrors leave it unset and we fall back to the bare repo
-        # name (e.g. `jq` for `jqlang/jq`). Override only when the
-        # repology key differs from the repo name — e.g. python-pip
-        # → `pip`, golang → `go`.
-        REPOL_NAME=$(cat .x-cmd/fskv/repology_name 2>/dev/null || basename "$OWNER_REPO")
+        # repology_name is opt-in: if .x-cmd/fskv/repology_name exists,
+        # the Repology step fetches that project. Otherwise the step
+        # is skipped entirely — we don't assume a default key, because
+        # wrong names silently produce a 200 with empty results.
+        if [ -f .x-cmd/fskv/repology_name ]; then
+            REPOL_NAME=$(cat .x-cmd/fskv/repology_name)
+            echo "repology=$REPOL_NAME" >> "$GITHUB_OUTPUT"
+        else
+            echo "repology=<unset>" >&2
+        fi
         echo "owner-repo=$OWNER_REPO"
         echo "scorecard=$SCORECARD_REPO"
-        echo "repology=$REPOL_NAME"
         echo "owner-repo=$OWNER_REPO" >> "$GITHUB_OUTPUT"
         echo "scorecard=$SCORECARD_REPO" >> "$GITHUB_OUTPUT"
-        echo "repology=$REPOL_NAME" >> "$GITHUB_OUTPUT"
 
     - name: Install x-cmd
       id: install
@@ -201,6 +203,7 @@ runs:
     # makes the data line-diffable in PRs.
     - name: Fetch repology project data
       id: repology
+      if: ${{ steps.fskv.outputs.repology != '' }}
       continue-on-error: true
       shell: bash
       env:
