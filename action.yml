@@ -321,35 +321,15 @@ runs:
 
         # shellcheck disable=SC1091
         . "$HOME/.x-cmd.root/X"
-        # Run `x eget classify` on the (in-memory) stripped release JSON
-        # to get a per-asset table (name | download_url | size | target).
-        # This is purely for the README — the tsv is not committed to
-        # the repo and disappears with the runner.
-        #
-        # The stripped JSON has no browser_download_url (strip_url_keys.py
-        # drops all url* keys), but classify needs that field to render
-        # the link column. We rebuild the URL from the well-known GitHub
-        # release layout — owner/repo/tag/asset-name — and feed the
-        # patched JSON to classify. The mirror data/ file is never
-        # touched: this only happens in the runner.
-        : > /tmp/classify.tsv
-        if [ -s /tmp/release.stripped.json ]; then
-            python3 "$GITHUB_ACTION_PATH/scripts/inject_release_urls.py" "$OWNER_REPO" \
-                < /tmp/release.stripped.json > /tmp/release.with-url.json
-            if x eget classify --tsv < /tmp/release.with-url.json > /tmp/classify.tsv 2>&1; then
-                :
-            else
-                rc=$?
-                echo "eget classify failed (rc=$rc)" >&2
-                # Show the stderr we just captured (file may be empty
-                # if classify printed to stdout, but we redirected both
-                # to /tmp/classify.tsv — fall back to a fresh run).
-                if [ -s /tmp/classify.tsv ]; then
-                    head -5 /tmp/classify.tsv | sed 's/^/  err: /' >&2
-                fi
-                : > /tmp/classify.tsv
-            fi
-        fi
+        # Build the assets table from the stripped release JSON. We
+        # used to pipe through `x eget classify --tsv`, but its awk
+        # implementation crashes on certain GNU awk versions in the
+        # runner with 'illegal reference to array tokens'. Doing the
+        # tiny classification ourselves in Python is more reliable and
+        # gives us full control over the output shape.
+        python3 "$GITHUB_ACTION_PATH/scripts/classify_assets.py" "$OWNER_REPO" \
+            < /tmp/release.stripped.json > /tmp/classify.tsv 2>/dev/null \
+            || : > /tmp/classify.tsv
 
         # The script writes both README.md (English) and README.cn.md
         # (Chinese) into the current working directory. Cross-language
