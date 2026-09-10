@@ -36,10 +36,9 @@ Note on yq usage:
   do one yq call per field. Slightly slower but rock-solid.
 """
 import datetime
+import json
 import subprocess
 import sys
-
-import yaml
 
 
 def yq(expr, file, default=""):
@@ -245,8 +244,20 @@ def repology_summary(repology_yml):
         return None
 
     try:
+        # Parse repology YAML with yq (no PyYAML on the runner). yq's
+        # -o=json converts YAML to a single-line JSON array; we then
+        # json.load it in Python (json ⊂ stdlib, no extra deps).
         with open(repology_yml) as f:
-            entries = yaml.safe_load(f)
+            text = f.read()
+        if not text.strip():
+            return None
+        out = subprocess.run(
+            ["yq", "-o=json", "-I=0", "."],
+            input=text, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        if not out or out == "null":
+            return None
+        entries = json.loads(out)
     except Exception:
         return None
     if not isinstance(entries, list) or not entries:
