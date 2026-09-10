@@ -122,15 +122,24 @@ def scorecard_summary(scorecard_file):
 def activity_summary(card_file):
     """Return list of (window, release, mergedPR, openPR, closedIssue, openIssue, commit).
 
-    windows: last30d, last90d, last360d — the most informative cuts.
+    windows: every entry under .recent — typically last30d / last60d /
+    last90d / last180d / last360d / last720d. The card collector
+    emits all of these; we render them all in the README so the
+    reader can pick the time horizon they care about (monthly vs
+    annual vs 2-year trend).
+
     Returns empty list if no .recent block.
     """
     import os
     if not card_file or not os.path.isfile(card_file):
         return []
-    windows = ["last30d", "last90d", "last360d"]
+    # Discover keys dynamically rather than hardcoding the list, so
+    # future windows (last5y, ...) light up automatically.
+    keys_raw = yq('.recent | keys | .[]', card_file)
     rows = []
-    for w in windows:
+    for w in keys_raw.splitlines():
+        if not w:
+            continue
         since = yq(f'.recent["{w}"].since // ""', card_file)
         if not since:
             continue
@@ -352,7 +361,7 @@ T = {
         "activity_hdr":  "| Window | Since | Releases | Merged PRs | Open PRs | Closed issues | Open issues | Commits |",
         "activity_sep":  "|---|---|---:|---:|---:|---:|---:|---:|",
         "activity_row":  "| {window} | {since} | {rel} | {mpr} | {opr} | {ci} | {oi} | {cmt} |",
-        "code_h":      "## Code size",
+        "code_h":      "## Code insight",
         "code_total":  "Total: **{total_loc:,}** lines of code across **{total_files}** files in the top 5 languages.",
         "code_hdr":    "| Language | Code | Comments | Blanks | Files |",
         "code_sep":    "|----------|-----:|---------:|-------:|------:|",
@@ -479,7 +488,45 @@ def build_readme(lang, name, owner_repo, d, card, loc, scorecard, classify_tsv, 
     lines.append("```")
     lines.append("")
 
-    # Source block
+    # Code insight (formerly Code size) — moved up here so the LOC
+    # signal is part of the headline reader experience, not buried
+    # below popularity/totals/activity. Renamed from "Code size" to
+    # "Code insight" because the section is more than byte counts
+    # (comments / blanks / file-count ratios tell you about code
+    # health, not just size).
+    if total_loc > 0:
+        lines.append(t["code_h"])
+        lines.append("")
+        total_files = sum(t_[4] for t_ in top_langs)
+        lines.append(t["code_total"].format(total_loc=total_loc, total_files=total_files))
+        lines.append("")
+        lines.append(t["code_hdr"])
+        lines.append(t["code_sep"])
+        for lang_, code, comments, blanks, files in top_langs:
+            lines.append(t["code_row"].format(
+                lang=lang_, code=code, comments=comments, blanks=blanks, files=files,
+            ))
+        lines.append("")
+
+    # OpenSSF scorecard block — moved up next to Code insight so the
+    # two "what does this project look like under the hood" sections
+    # sit together.
+    if score:
+        lines.append(t["sc_h"])
+        lines.append("")
+        lines.append(t["sc_total"].format(score=score))
+        lines.append("")
+        if low_checks:
+            lines.append(t["sc_low_h"])
+            lines.append("")
+            for name_, s, reason in low_checks:
+                r = (reason[:120] + "…") if len(reason) > 120 else reason
+                lines.append(t["sc_low_row"].format(name=name_, score=s, reason=r))
+            lines.append("")
+
+    # Source block — moved to after Code insight + OpenSSF so the
+    # reader sees what's inside the project before they're pointed
+    # elsewhere.
     lines.append(t["source_h"])
     lines.append("")
     lines.append(t["upstream"].format(owner_repo=owner_repo))
@@ -533,34 +580,6 @@ def build_readme(lang, name, owner_repo, d, card, loc, scorecard, classify_tsv, 
                 opr=opr, ci=ci, oi=oi, cmt=cmt,
             ))
         lines.append("")
-
-    # LOC block — only if we have data
-    if total_loc > 0:
-        lines.append(t["code_h"])
-        lines.append("")
-        total_files = sum(t_[4] for t_ in top_langs)
-        lines.append(t["code_total"].format(total_loc=total_loc, total_files=total_files))
-        lines.append("")
-        lines.append(t["code_hdr"])
-        lines.append(t["code_sep"])
-        for lang_, code, comments, blanks, files in top_langs:
-            lines.append(t["code_row"].format(
-                lang=lang_, code=code, comments=comments, blanks=blanks, files=files,
-            ))
-        lines.append("")
-
-    # OpenSSF scorecard block — only if we have a score
-    if score:
-        lines.append(t["sc_h"])
-        lines.append("")
-        lines.append(t["sc_total"].format(score=score))
-        lines.append("")
-        if low_checks:
-            lines.append(t["sc_low_h"])
-            lines.append("")
-            for name_, s, reason in low_checks:
-                r = (reason[:120] + "…") if len(reason) > 120 else reason
-                lines.append(t["sc_low_row"].format(name=name_, score=s, reason=r))
             lines.append("")
 
     # Release assets table — only if x eget classify produced rows.
