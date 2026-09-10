@@ -407,7 +407,7 @@ T = {
         "activity_hdr":  "| 时间窗口 | 起始 | 发布 | 已合并 PR | 开放 PR | 已关闭 issue | 开放 issue | 提交 |",
         "activity_sep":  "|---|---|---:|---:|---:|---:|---:|---:|",
         "activity_row":  "| {window} | {since} | {rel} | {mpr} | {opr} | {ci} | {oi} | {cmt} |",
-        "code_h":      "## 代码规模",
+        "code_h":      "## 代码洞察",
         "code_total":  "合计: **{total_loc:,}** 行代码（覆盖前 5 种语言、共 **{total_files}** 个文件）。",
         "code_hdr":    "| 语言 | 代码 | 注释 | 空行 | 文件数 |",
         "code_sep":    "|------|-----:|-----:|-----:|------:|",
