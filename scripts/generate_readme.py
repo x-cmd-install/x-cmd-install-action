@@ -174,6 +174,49 @@ def release_assets_count(release_file):
     return n, published
 
 
+def classify_assets(classify_tsv):
+    """Read the TSV produced by `x eget classify --tsv` and return a
+    list of (name, url, size_bytes, target) rows.
+
+    x eget classify emits 4 tab-separated columns:
+      name<TAB>browser_download_url<TAB>size_bytes<TAB>target
+
+    We keep the columns raw here — the caller is responsible for
+    formatting size_bytes as human-readable when rendering.
+    Returns [] if the file is missing or empty.
+    """
+    import os
+    if not classify_tsv or not os.path.isfile(classify_tsv):
+        return []
+    rows = []
+    with open(classify_tsv) as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            parts = line.split("\t")
+            if len(parts) < 4:
+                continue
+            name, url, size_s, target = parts[0], parts[1], parts[2], parts[3]
+            try:
+                size = int(size_s)
+            except ValueError:
+                continue
+            rows.append((name, url, size, target))
+    return rows
+
+
+def fmt_bytes(n):
+    """1024-based: 0 → '0 B', 1024 → '1.0 KiB', 1536 → '1.5 KiB'."""
+    if n < 1024:
+        return f"{n} B"
+    for unit in ("KiB", "MiB", "GiB", "TiB"):
+        n /= 1024.0
+        if abs(n) < 1024:
+            return f"{n:.1f} {unit}"
+    return f"{n:.1f} PiB"
+
+
 
 # ---------- i18n strings ----------
 
@@ -193,6 +236,10 @@ T = {
         "last_commit": "- **Last commit**: {last_commit}",
         "assets":      "- **Assets in release**: {n}",
         "published":   "- **Published**: {ts}",
+        "assets_h":    "## Release assets",
+        "assets_hdr":  "| Asset | Size | Target |",
+        "assets_sep":  "|-------|-----:|--------|",
+        "assets_row":  "| [{name}]({url}) | {size} | `{target}` |",
         "popularity_h": "## Popularity",
         "popularity":  "- **Stars**: {stars} · **Forks**: {forks} · **Open issues**: {open_issues} · **Contributors**: {contributors}",
         "totals_h":    "## Totals (cumulative)",
@@ -211,7 +258,7 @@ T = {
         "sc_low_h":    "Lowest-scoring checks:",
         "sc_low_row":  "- **{name}** ({score}/10) — {reason}",
         "improve_h":   "## Improve this data",
-        "improve_body": "Install metadata for {name} lives in the [x-cmd/install](https://github.com/x-cmd/install) index — a curated YAML package list that x-cmd consumes at install time. If `{name}` is missing, out of date, or installs incorrectly, please open an issue or PR there:\n\n- **Open an issue**: <https://github.com/x-cmd/install/issues/new>\n- **Edit the package entry**: <https://github.com/x-cmd/edit/main/{name}.yml> (or whichever path the index uses)\n\nThe data on this page (card / loc / scorecard / release) is auto-collected by [x-cmd-install-action](https://github.com/x-cmd-install/x-cmd-install-action) and is regenerated daily. Improvements to *install behaviour* (which version gets installed, platform-specific quirks, dependencies) belong upstream in the index.",
+        "improve_body": "Install metadata for {name} lives in the [x-cmd/install](https://github.com/x-cmd/install) index — a curated YAML package list that x-cmd consumes at install time. If `{name}` is missing, out of date, or installs incorrectly, please open an issue or PR there:\n\n- **Open an issue**: <https://github.com/x-cmd/install/issues/new>\n- **Edit the package entry**: <https://github.com/x-cmd/install/edit/main/{name}.yml> (or whichever path the index uses)\n\nThe data on this page (card / loc / scorecard / release) is auto-collected by [x-cmd-install-action](https://github.com/x-cmd-install/x-cmd-install-action) and is regenerated daily. Improvements to *install behaviour* (which version gets installed, platform-specific quirks, dependencies) belong upstream in the index.",
         "footer":      "_Snapshot: `data/card/{d}.yml` · {now}._",
         "logo":        "![{name}](https://repo.x-cmd.io/{name}.svg)",
     },
@@ -230,6 +277,10 @@ T = {
         "last_commit": "- **最近提交**: {last_commit}",
         "assets":      "- **Release 含资产**: {n} 个",
         "published":   "- **发布时间**: {ts}",
+        "assets_h":    "## Release 资产",
+        "assets_hdr":  "| 资产 | 大小 | 目标平台 |",
+        "assets_sep":  "|------|-----:|----------|",
+        "assets_row":  "| [{name}]({url}) | {size} | `{target}` |",
         "popularity_h": "## 流行度",
         "popularity":  "- **Star**: {stars} · **Fork**: {forks} · **开放 issue**: {open_issues} · **贡献者**: {contributors}",
         "totals_h":    "## 累计统计",
@@ -255,7 +306,7 @@ T = {
 }
 
 
-def build_readme(lang, name, owner_repo, d, card, loc, scorecard, release):
+def build_readme(lang, name, owner_repo, d, card, loc, scorecard, classify_tsv):
     """Return the rendered README content for one language."""
     t = T[lang]
 
@@ -275,7 +326,7 @@ def build_readme(lang, name, owner_repo, d, card, loc, scorecard, release):
     score, low_checks = scorecard_summary(scorecard)
     activity_rows = activity_summary(card)
     totals = totals_summary(card)
-    asset_count, released_at = release_assets_count(release)
+    asset_rows = classify_assets(classify_tsv)
 
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -334,10 +385,23 @@ def build_readme(lang, name, owner_repo, d, card, loc, scorecard, release):
                 lines.append(t["latest"].format(latest=latest))
         if last_commit:
             lines.append(t["last_commit"].format(last_commit=last_commit))
-        if asset_count > 0:
-            lines.append(t["assets"].format(n=asset_count))
-        if released_at:
-            lines.append(t["published"].format(ts=released_at))
+        if asset_rows:
+            lines.append(t["assets"].format(n=len(asset_rows)))
+        lines.append("")
+
+    # Release assets table — only if x eget classify produced rows.
+    # Each row: name is a hyperlink to the GitHub release download URL,
+    # size is human-readable (KiB/MiB/GiB), target is x-cmd's native
+    # platform identifier (e.g. native/darwin/arm64).
+    if asset_rows:
+        lines.append(t["assets_h"])
+        lines.append("")
+        lines.append(t["assets_hdr"])
+        lines.append(t["assets_sep"])
+        for aname, aurl, asize, atarget in asset_rows:
+            lines.append(t["assets_row"].format(
+                name=aname, url=aurl, size=fmt_bytes(asize), target=atarget,
+            ))
         lines.append("")
 
     # Popularity block
@@ -411,15 +475,15 @@ def build_readme(lang, name, owner_repo, d, card, loc, scorecard, release):
 
 def main():
     if len(sys.argv) != 7:
-        print(f"usage: {sys.argv[0]} <card.yml> <loc.yml> <scorecard.yml> <release.json> <owner_repo> <date_stamp>",
+        print(f"usage: {sys.argv[0]} <card.yml> <loc.yml> <scorecard.yml> <classify.tsv> <owner_repo> <date_stamp>",
               file=sys.stderr)
         sys.exit(2)
-    card, loc, scorecard, release = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+    card, loc, scorecard, classify_tsv = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
     owner_repo, d = sys.argv[5], sys.argv[6]
     name = owner_repo.split("/", 1)[-1]
 
-    en = build_readme("en", name, owner_repo, d, card, loc, scorecard, release)
-    cn = build_readme("cn", name, owner_repo, d, card, loc, scorecard, release)
+    en = build_readme("en", name, owner_repo, d, card, loc, scorecard, classify_tsv)
+    cn = build_readme("cn", name, owner_repo, d, card, loc, scorecard, classify_tsv)
 
     with open("README.md", "w") as f:
         f.write(en)

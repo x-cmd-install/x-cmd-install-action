@@ -311,11 +311,30 @@ runs:
 
         # shellcheck disable=SC1091
         . "$HOME/.x-cmd.root/X"
+        # Run `x eget classify` on the (in-memory) stripped release JSON
+        # to get a per-asset table (name | download_url | size | target).
+        # This is purely for the README — the tsv is not committed to
+        # the repo and disappears with the runner.
+        #
+        # The stripped JSON has no browser_download_url (strip_url_keys.py
+        # drops all url* keys), but classify needs that field to render
+        # the link column. We rebuild the URL from the well-known GitHub
+        # release layout — owner/repo/tag/asset-name — and feed the
+        # patched JSON to classify. The mirror data/ file is never
+        # touched: this only happens in the runner.
+        : > /tmp/classify.tsv
+        if [ -s /tmp/release.stripped.json ]; then
+            python3 "$GITHUB_ACTION_PATH/scripts/inject_release_urls.py" "$OWNER_REPO" \
+                < /tmp/release.stripped.json > /tmp/release.with-url.json
+            x eget classify --tsv < /tmp/release.with-url.json > /tmp/classify.tsv 2>/dev/null \
+                || echo "eget classify failed; release section will be skipped" >&2
+        fi
+
         # The script writes both README.md (English) and README.cn.md
         # (Chinese) into the current working directory. Cross-language
         # links at the top of each file point at the other.
         python3 "$GITHUB_ACTION_PATH/scripts/generate_readme.py" \
-            /tmp/card.yml /tmp/loc.yml /tmp/scorecard.yml /tmp/release.stripped.json \
+            /tmp/card.yml /tmp/loc.yml /tmp/scorecard.yml /tmp/classify.tsv \
             "$OWNER_REPO" "$d"
 
         if git status --porcelain -- README.md README.cn.md | grep -q .; then
