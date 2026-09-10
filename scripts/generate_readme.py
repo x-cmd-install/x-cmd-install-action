@@ -66,7 +66,8 @@ def loc_summary(loc_file):
     """Return (total_code, top_langs) where top_langs is up to 5 entries
     of (language, code, comments, blanks, files) sorted by code desc.
     """
-    if not loc_file:
+    import os
+    if not loc_file or not os.path.isfile(loc_file):
         return 0, []
     keys = yq('.loc | keys | .[]', loc_file)
     if not keys:
@@ -89,7 +90,8 @@ def loc_summary(loc_file):
 
 def scorecard_summary(scorecard_file):
     """Return (overall_score, low_score_checks)."""
-    if not scorecard_file:
+    import os
+    if not scorecard_file or not os.path.isfile(scorecard_file):
         return None, []
     score = yq('.score // ""', scorecard_file)
     if not score:
@@ -116,6 +118,63 @@ def scorecard_summary(scorecard_file):
     return score, lows
 
 
+def activity_summary(card_file):
+    """Return list of (window, release, mergedPR, openPR, closedIssue, openIssue, commit).
+
+    windows: last30d, last90d, last360d — the most informative cuts.
+    Returns empty list if no .recent block.
+    """
+    import os
+    if not card_file or not os.path.isfile(card_file):
+        return []
+    windows = ["last30d", "last90d", "last360d"]
+    rows = []
+    for w in windows:
+        since = yq(f'.recent["{w}"].since // ""', card_file)
+        if not since:
+            continue
+        rel  = int(yq(f'.recent["{w}"].release // 0',     card_file) or 0)
+        mpr  = int(yq(f'.recent["{w}"].mergedPR // 0',     card_file) or 0)
+        opr  = int(yq(f'.recent["{w}"].openPR // 0',       card_file) or 0)
+        ci   = int(yq(f'.recent["{w}"].closedIssue // 0',  card_file) or 0)
+        oi   = int(yq(f'.recent["{w}"].openIssue // 0',    card_file) or 0)
+        cmt  = int(yq(f'.recent["{w}"].commit // 0',       card_file) or 0)
+        rows.append((w, since, rel, mpr, opr, ci, oi, cmt))
+    return rows
+
+
+def totals_summary(card_file):
+    """Return dict of cumulative totals: release/mergedPR/openPR/closedIssue/openIssue/commit."""
+    import os
+    if not card_file or not os.path.isfile(card_file):
+        return {}
+    return {
+        "release":      int(yq('.total.release // 0',      card_file) or 0),
+        "mergedPR":     int(yq('.total.mergedPR // 0',     card_file) or 0),
+        "openPR":       int(yq('.total.openPR // 0',       card_file) or 0),
+        "closedIssue":  int(yq('.total.closedIssue // 0',  card_file) or 0),
+        "openIssue":    int(yq('.total.openIssue // 0',    card_file) or 0),
+        "commit":       int(yq('.total.commit // 0',       card_file) or 0),
+    }
+
+
+def release_assets_count(release_file):
+    """Return (asset_count, published_at) for the latest release."""
+    if not release_file:
+        return 0, ""
+    import os
+    if not os.path.isfile(release_file):
+        return 0, ""
+    n_raw = yq('.assets // [] | length', release_file)
+    try:
+        n = int(n_raw)
+    except ValueError:
+        n = 0
+    published = yq('.published_at // ""', release_file)
+    return n, published
+
+
+
 # ---------- i18n strings ----------
 
 T = {
@@ -132,8 +191,16 @@ T = {
         "latest":      "- **Latest**: `{latest}`",
         "latest_with_date": "- **Latest**: `{latest}` ({last_release})",
         "last_commit": "- **Last commit**: {last_commit}",
+        "assets":      "- **Assets in release**: {n}",
+        "published":   "- **Published**: {ts}",
         "popularity_h": "## Popularity",
         "popularity":  "- **Stars**: {stars} · **Forks**: {forks} · **Open issues**: {open_issues} · **Contributors**: {contributors}",
+        "totals_h":    "## Totals (cumulative)",
+        "totals_row":  "- **Releases**: {release} · **Merged PRs**: {mergedPR} · **Open PRs**: {openPR} · **Closed issues**: {closedIssue} · **Open issues**: {openIssue} · **Commits**: {commit}",
+        "activity_h":  "## Recent activity",
+        "activity_hdr":  "| Window | Since | Releases | Merged PRs | Open PRs | Closed issues | Open issues | Commits |",
+        "activity_sep":  "|---|---|---:|---:|---:|---:|---:|---:|",
+        "activity_row":  "| {window} | {since} | {rel} | {mpr} | {opr} | {ci} | {oi} | {cmt} |",
         "code_h":      "## Code size",
         "code_total":  "Total: **{total_loc:,}** lines of code across **{total_files}** files in the top 5 languages.",
         "code_hdr":    "| Language | Code | Comments | Blanks | Files |",
@@ -143,6 +210,8 @@ T = {
         "sc_total":    "Overall score: **{score} / 10**",
         "sc_low_h":    "Lowest-scoring checks:",
         "sc_low_row":  "- **{name}** ({score}/10) — {reason}",
+        "improve_h":   "## Improve this data",
+        "improve_body": "Install metadata for {name} lives in the [x-cmd/install](https://github.com/x-cmd/install) index — a curated YAML package list that x-cmd consumes at install time. If `{name}` is missing, out of date, or installs incorrectly, please open an issue or PR there:\n\n- **Open an issue**: <https://github.com/x-cmd/install/issues/new>\n- **Edit the package entry**: <https://github.com/x-cmd/edit/main/{name}.yml> (or whichever path the index uses)\n\nThe data on this page (card / loc / scorecard / release) is auto-collected by [x-cmd-install-action](https://github.com/x-cmd-install/x-cmd-install-action) and is regenerated daily. Improvements to *install behaviour* (which version gets installed, platform-specific quirks, dependencies) belong upstream in the index.",
         "footer":      "_Snapshot: `data/card/{d}.yml` · {now}._",
         "logo":        "![{name}](https://repo.x-cmd.io/{name}.svg)",
     },
@@ -159,8 +228,16 @@ T = {
         "latest":      "- **最新版本**: `{latest}`",
         "latest_with_date": "- **最新版本**: `{latest}` ({last_release})",
         "last_commit": "- **最近提交**: {last_commit}",
+        "assets":      "- **Release 含资产**: {n} 个",
+        "published":   "- **发布时间**: {ts}",
         "popularity_h": "## 流行度",
         "popularity":  "- **Star**: {stars} · **Fork**: {forks} · **开放 issue**: {open_issues} · **贡献者**: {contributors}",
+        "totals_h":    "## 累计统计",
+        "totals_row":  "- **发布数**: {release} · **已合并 PR**: {mergedPR} · **开放 PR**: {openPR} · **已关闭 issue**: {closedIssue} · **开放 issue**: {openIssue} · **提交数**: {commit}",
+        "activity_h":  "## 最近活动",
+        "activity_hdr":  "| 时间窗口 | 起始 | 发布 | 已合并 PR | 开放 PR | 已关闭 issue | 开放 issue | 提交 |",
+        "activity_sep":  "|---|---|---:|---:|---:|---:|---:|---:|",
+        "activity_row":  "| {window} | {since} | {rel} | {mpr} | {opr} | {ci} | {oi} | {cmt} |",
         "code_h":      "## 代码规模",
         "code_total":  "合计: **{total_loc:,}** 行代码（覆盖前 5 种语言、共 **{total_files}** 个文件）。",
         "code_hdr":    "| 语言 | 代码 | 注释 | 空行 | 文件数 |",
@@ -170,13 +247,15 @@ T = {
         "sc_total":    "总评分: **{score} / 10**",
         "sc_low_h":    "评分最低的几项:",
         "sc_low_row":  "- **{name}** ({score}/10) — {reason}",
+        "improve_h":   "## 改进这些数据",
+        "improve_body": "{name} 的安装元数据由 [x-cmd/install](https://github.com/x-cmd/install) 索引维护——这是一份由 x-cmd 在安装时读取的精选 YAML 包列表。如果 `{name}` 缺失、过期，或安装行为有问题，欢迎在该 repo 提 issue 或 PR：\n\n- **提交 issue**: <https://github.com/x-cmd/install/issues/new>\n- **编辑包条目**: <https://github.com/x-cmd/install/edit/main/{name}.yml>（或索引实际使用的路径）\n\n本页面的数据（card / loc / scorecard / release）由 [x-cmd-install-action](https://github.com/x-cmd-install/x-cmd-install-action) 自动采集，每日重新生成。**安装行为**（版本选择、平台差异、依赖处理）的改进应提交到上游索引。",
         "footer":      "_数据快照: `data/card/{d}.yml` · {now}._",
         "logo":        "![{name}](https://repo.x-cmd.io/{name}.svg)",
     },
 }
 
 
-def build_readme(lang, name, owner_repo, d, card, loc, scorecard):
+def build_readme(lang, name, owner_repo, d, card, loc, scorecard, release):
     """Return the rendered README content for one language."""
     t = T[lang]
 
@@ -194,6 +273,9 @@ def build_readme(lang, name, owner_repo, d, card, loc, scorecard):
 
     total_loc, top_langs = loc_summary(loc)
     score, low_checks = scorecard_summary(scorecard)
+    activity_rows = activity_summary(card)
+    totals = totals_summary(card)
+    asset_count, released_at = release_assets_count(release)
 
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -252,6 +334,10 @@ def build_readme(lang, name, owner_repo, d, card, loc, scorecard):
                 lines.append(t["latest"].format(latest=latest))
         if last_commit:
             lines.append(t["last_commit"].format(last_commit=last_commit))
+        if asset_count > 0:
+            lines.append(t["assets"].format(n=asset_count))
+        if released_at:
+            lines.append(t["published"].format(ts=released_at))
         lines.append("")
 
     # Popularity block
@@ -261,6 +347,28 @@ def build_readme(lang, name, owner_repo, d, card, loc, scorecard):
         stars=stars, forks=forks, open_issues=open_issues, contributors=contributors,
     ))
     lines.append("")
+
+    # Totals (cumulative) — only if we have data
+    if totals:
+        lines.append(t["totals_h"])
+        lines.append("")
+        lines.append(t["totals_row"].format(**totals))
+        lines.append("")
+
+    # Recent activity — only if we have data
+    if activity_rows:
+        lines.append(t["activity_h"])
+        lines.append("")
+        lines.append(t["activity_hdr"])
+        lines.append(t["activity_sep"])
+        # Format window labels for display
+        win_label = {"last30d": "30d", "last90d": "90d", "last360d": "360d"}
+        for w, since, rel, mpr, opr, ci, oi, cmt in activity_rows:
+            lines.append(t["activity_row"].format(
+                window=win_label.get(w, w), since=since, rel=rel, mpr=mpr,
+                opr=opr, ci=ci, oi=oi, cmt=cmt,
+            ))
+        lines.append("")
 
     # LOC block — only if we have data
     if total_loc > 0:
@@ -291,21 +399,27 @@ def build_readme(lang, name, owner_repo, d, card, loc, scorecard):
                 lines.append(t["sc_low_row"].format(name=name_, score=s, reason=r))
             lines.append("")
 
+    # Improve section — always present, invites contribution
+    lines.append(t["improve_h"])
+    lines.append("")
+    lines.append(t["improve_body"].format(name=name))
+    lines.append("")
+
     lines.append(t["footer"].format(d=d, now=now))
     return "\n".join(lines) + "\n"
 
 
 def main():
-    if len(sys.argv) != 6:
-        print(f"usage: {sys.argv[0]} <card.yml> <loc.yml> <scorecard.yml> <owner_repo> <date_stamp>",
+    if len(sys.argv) != 7:
+        print(f"usage: {sys.argv[0]} <card.yml> <loc.yml> <scorecard.yml> <release.json> <owner_repo> <date_stamp>",
               file=sys.stderr)
         sys.exit(2)
-    card, loc, scorecard = sys.argv[1], sys.argv[2], sys.argv[3]
-    owner_repo, d = sys.argv[4], sys.argv[5]
+    card, loc, scorecard, release = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+    owner_repo, d = sys.argv[5], sys.argv[6]
     name = owner_repo.split("/", 1)[-1]
 
-    en = build_readme("en", name, owner_repo, d, card, loc, scorecard)
-    cn = build_readme("cn", name, owner_repo, d, card, loc, scorecard)
+    en = build_readme("en", name, owner_repo, d, card, loc, scorecard, release)
+    cn = build_readme("cn", name, owner_repo, d, card, loc, scorecard, release)
 
     with open("README.md", "w") as f:
         f.write(en)

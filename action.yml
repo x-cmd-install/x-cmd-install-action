@@ -315,7 +315,7 @@ runs:
         # (Chinese) into the current working directory. Cross-language
         # links at the top of each file point at the other.
         python3 "$GITHUB_ACTION_PATH/scripts/generate_readme.py" \
-            /tmp/card.yml /tmp/loc.yml /tmp/scorecard.yml \
+            /tmp/card.yml /tmp/loc.yml /tmp/scorecard.yml /tmp/release.stripped.json \
             "$OWNER_REPO" "$d"
 
         if git status --porcelain -- README.md README.cn.md | grep -q .; then
