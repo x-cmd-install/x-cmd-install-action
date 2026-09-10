@@ -336,8 +336,19 @@ runs:
         if [ -s /tmp/release.stripped.json ]; then
             python3 "$GITHUB_ACTION_PATH/scripts/inject_release_urls.py" "$OWNER_REPO" \
                 < /tmp/release.stripped.json > /tmp/release.with-url.json
-            x eget classify --tsv < /tmp/release.with-url.json > /tmp/classify.tsv 2>/dev/null \
-                || echo "eget classify failed; release section will be skipped" >&2
+            if x eget classify --tsv < /tmp/release.with-url.json > /tmp/classify.tsv 2>&1; then
+                :
+            else
+                rc=$?
+                echo "eget classify failed (rc=$rc)" >&2
+                # Show the stderr we just captured (file may be empty
+                # if classify printed to stdout, but we redirected both
+                # to /tmp/classify.tsv — fall back to a fresh run).
+                if [ -s /tmp/classify.tsv ]; then
+                    head -5 /tmp/classify.tsv | sed 's/^/  err: /' >&2
+                fi
+                : > /tmp/classify.tsv
+            fi
         fi
 
         # The script writes both README.md (English) and README.cn.md
