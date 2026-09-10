@@ -306,10 +306,10 @@ def repology_summary(repology_yml):
         if rkey in by_repo:
             ver, status = by_repo[rkey]
             status_label = {
-                "newest":   "✓ latest",
-                "outdated": "outdated",
-                "legacy":   "legacy",
-                "rolling":  "rolling",
+                "newest":   "✅ latest",
+                "outdated": "⚠️ outdated",
+                "legacy":   "🪦 legacy",
+                "rolling":  "🔄 rolling",
             }.get(status, status)
             popular.append((label, ver, status_label))
 
@@ -362,7 +362,7 @@ T = {
         "sc_low_h":    "Lowest-scoring checks:",
         "sc_low_row":  "- **{name}** ({score}/10) — {reason}",
         "dist_h":      "## Distribution status",
-        "dist_summary": "Reported by **{total}** distros on repology.org. **{latest}** are on the latest upstream release, **{outdated}** are on an older version.",
+        "dist_summary": "Reported by **{total}** distros on [repology.org](https://repology.org/project/{name}). **{latest}** are ✅ on the latest upstream release, **{outdated}** are ⚠️ on an older version.",
         "dist_hdr":    "| Distro | Version | Status |",
         "dist_sep":    "|--------|---------|--------|",
         "dist_row":    "| {repo} | `{version}` | {status} |",
@@ -408,7 +408,7 @@ T = {
         "sc_low_h":    "评分最低的几项:",
         "sc_low_row":  "- **{name}** ({score}/10) — {reason}",
         "dist_h":      "## 发行版状态",
-        "dist_summary": "在 repology.org 上共有 **{total}** 个发行版报告此项目。**{latest}** 个已是最新上游版本，**{outdated}** 个使用旧版本。",
+        "dist_summary": "在 [repology.org](https://repology.org/project/{name}) 上共有 **{total}** 个发行版报告此项目。**{latest}** 个 ✅ 已是最新上游版本，**{outdated}** 个 ⚠️ 使用旧版本。",
         "dist_hdr":    "| 发行版 | 版本 | 状态 |",
         "dist_sep":    "|--------|------|------|",
         "dist_row":    "| {repo} | `{version}` | {status} |",
@@ -592,6 +592,7 @@ def build_readme(lang, name, owner_repo, d, card, loc, scorecard, classify_tsv, 
             total=repology_rows["total"],
             latest=repology_rows["latest"],
             outdated=repology_rows["outdated"],
+            name=name,
         ))
         lines.append("")
         if repology_rows["popular"]:
