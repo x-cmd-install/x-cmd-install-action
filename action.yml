@@ -163,23 +163,23 @@ runs:
         set -eo pipefail
         mkdir -p /tmp/release
         out_rel="/tmp/release/latest.release.raw.json"
-        if curl -sSfL -H "Authorization: Bearer ${GH_TOKEN}" \
+        # Use plain curl + capture the HTTP code ourselves. -f hides
+        # the error message in some curl builds when combined with -s,
+        # so we keep -s for silent body but drop -f and decide success
+        # from the http_code.
+        http=$(curl -sSL -o "$out_rel" -w '%{http_code}' \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${OWNER_REPO}/releases/latest" \
-              > "$out_rel" 2> /tmp/release.err; then
+              "https://api.github.com/repos/${OWNER_REPO}/releases/latest")
+        if [ "$http" = "200" ] && [ -s "$out_rel" ]; then
             echo "release-bytes=$(wc -c < "$out_rel")" >> "$GITHUB_OUTPUT"
         else
-            rc=$?
-            # Echo release.err line-by-line so it lands in the step log,
-            # not just on stderr where GitHub collapses it. Useful when
-            # debugging why a fetch silently failed.
-            echo "release fetch failed (rc=$rc)" >&2
-            if [ -s /tmp/release.err ]; then
-                while IFS= read -r line; do
-                    echo "  release.err: $line" >&2
-                done < /tmp/release.err
-            else
-                echo "  release.err is empty" >&2
+            echo "release fetch failed (http=$http, bytes=$(wc -c < "$out_rel" 2>/dev/null || echo 0))" >&2
+            # curl with -o writes the body even on HTTP error. Show the
+            # first line of the body if it looks like JSON (helps when
+            # 403/429 etc. return a JSON error message).
+            if [ -s "$out_rel" ]; then
+                head -c 500 "$out_rel" | sed 's/^/  body: /' >&2 || true
             fi
             : > "$out_rel"
         fi
