@@ -20,7 +20,7 @@ Why a Python script (not a bash heredoc):
 Layout strategy:
   Front-load everything SEO-relevant on the first screen:
     1. Title + description (the actual content of the software)
-    2. Logo SVG (every mirror gets https://repo.x-cmd.io/<name>.svg)
+    2. Logo SVG (every mirror gets https://x-cmd.com/repo-card/<name>.svg)
     3. Upstream + homepage links
     4. Install command
     5. Metadata block (license, release, popularity)
@@ -378,7 +378,7 @@ T = {
         "improve_h":   "## Improve this data",
         "improve_body": "Install metadata for {name} lives in the [x-cmd/install](https://github.com/x-cmd/install) index — a curated YAML package list that x-cmd consumes at install time. If `{name}` is missing, out of date, or installs incorrectly, please open an issue or PR there:\n\n- **Open an issue**: <https://github.com/x-cmd/install/issues/new>\n- **Edit the package entry**: <https://github.com/x-cmd/install/edit/main/{name}.yml> (or whichever path the index uses)\n\nThe data on this page (card / loc / scorecard / release) is auto-collected by [x-cmd-install-action](https://github.com/x-cmd-install/x-cmd-install-action) and is regenerated daily. Improvements to *install behaviour* (which version gets installed, platform-specific quirks, dependencies) belong upstream in the index.",
         "footer":      "_Snapshot: `data/card/{d}.yml` · {now}._",
-        "logo":        "[![x-cmd/install — {name} Code Quality Monitoring Repo Card](https://repo.x-cmd.io/{name}.svg)](https://x-cmd.com/install/{name})",
+        "logo":        "[![x-cmd/install — {name} Code Quality Monitoring Repo Card](https://x-cmd.com/repo-card/{name}.svg)](https://x-cmd.com/install/{name})",
     },
     "cn": {
         "lang_link":   "English version",
@@ -424,7 +424,7 @@ T = {
         "improve_h":   "## 改进这些数据",
         "improve_body": "{name} 的安装元数据由 [x-cmd/install](https://github.com/x-cmd/install) 索引维护——这是一份由 x-cmd 在安装时读取的精选 YAML 包列表。如果 `{name}` 缺失、过期，或安装行为有问题，欢迎在该 repo 提 issue 或 PR：\n\n- **提交 issue**: <https://github.com/x-cmd/install/issues/new>\n- **编辑包条目**: <https://github.com/x-cmd/install/edit/main/{name}.yml>（或索引实际使用的路径）\n\n本页面的数据（card / loc / scorecard / release）由 [x-cmd-install-action](https://github.com/x-cmd-install/x-cmd-install-action) 自动采集，每日重新生成。**安装行为**（版本选择、平台差异、依赖处理）的改进应提交到上游索引。",
         "footer":      "_数据快照: `data/card/{d}.yml` · {now}._",
-        "logo":        "[![x-cmd/install — {name} Code Quality Monitoring Repo Card](https://repo.x-cmd.io/{name}.svg?lang=zh)](https://x-cmd.com/install/{name})",
+        "logo":        "[![x-cmd/install — {name} Code Quality Monitoring Repo Card](https://x-cmd.com/repo-card/{name}.svg?lang=zh)](https://x-cmd.com/install/{name})",
     },
 }
 
