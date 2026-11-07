@@ -10,6 +10,12 @@ Outputs two files in the current directory:
   README.md     — English version (primary, GitHub displays this by default)
   README.cn.md  — Chinese version (linked from README.md)
 
+Environment:
+  DISPLAY_NAME  Optional override for the user-facing name used in the
+                title, install command and badge. Sourced from the
+                caller's .x-cmd/fskv/display_name; when empty/unset the
+                upstream repo basename (owner_repo split on '/') is used.
+
 Why a Python script (not a bash heredoc):
   The action's YAML manifest uses a literal-block scalar for the run
   step (`run: |`). GitHub Actions' simplified YAML parser refuses to
@@ -37,6 +43,7 @@ Note on yq usage:
 """
 import datetime
 import json
+import os
 import subprocess
 import sys
 
@@ -641,7 +648,12 @@ def main():
         sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
     )
     owner_repo, d = sys.argv[6], sys.argv[7]
-    name = owner_repo.split("/", 1)[-1]
+    # Opt-in display name override, passed via DISPLAY_NAME from the
+    # caller's .x-cmd/fskv/display_name. Needed when the card repo's
+    # user-facing install name differs from the upstream repo basename
+    # (e.g. x-cmd-install/backupdrill tracks upstream backupdrill/cli).
+    # Empty/unset → fall back to the upstream repo basename.
+    name = os.environ.get("DISPLAY_NAME", "").strip() or owner_repo.split("/", 1)[-1]
 
     en = build_readme("en", name, owner_repo, d, card, loc, scorecard, classify_tsv, repology_yml)
     cn = build_readme("cn", name, owner_repo, d, card, loc, scorecard, classify_tsv, repology_yml)

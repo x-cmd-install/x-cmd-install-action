@@ -38,10 +38,20 @@ runs:
         else
             echo "repology=<unset>" >&2
         fi
+        # display_name is opt-in: set .x-cmd/fskv/display_name when the
+        # card repo's user-facing install name differs from the upstream
+        # repo basename (e.g. x-cmd-install/backupdrill tracks
+        # backupdrill/cli). The README step uses it for the title,
+        # install command and badge. Unset/empty → upstream basename.
+        DISPLAY_NAME=""
+        if [ -f .x-cmd/fskv/display_name ]; then
+            DISPLAY_NAME=$(cat .x-cmd/fskv/display_name)
+        fi
         echo "owner-repo=$OWNER_REPO"
         echo "scorecard=$SCORECARD_REPO"
         echo "owner-repo=$OWNER_REPO" >> "$GITHUB_OUTPUT"
         echo "scorecard=$SCORECARD_REPO" >> "$GITHUB_OUTPUT"
+        echo "display-name=$DISPLAY_NAME" >> "$GITHUB_OUTPUT"
 
     - name: Install x-cmd
       id: install
@@ -379,6 +389,7 @@ runs:
       shell: bash
       env:
         OWNER_REPO: ${{ steps.fskv.outputs.owner-repo }}
+        DISPLAY_NAME: ${{ steps.fskv.outputs.display-name }}
       run: |
         set -eo pipefail
         d=$(date -u +%y%m%d)
